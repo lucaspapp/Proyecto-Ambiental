@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from datetime import datetime
+from conexion.py import obtener_conexion
 app = FastAPI()
 datos_sensores = []
 
