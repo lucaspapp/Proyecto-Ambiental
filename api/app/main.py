@@ -1,7 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI,Form
 from pydantic import BaseModel
 from datetime import datetime
-from conexion.py import obtener_conexion
+from mysql.connector import Error
+from conexion import conectar
+from fastapi.responses import FileResponse
+
+
 app = FastAPI()
 datos_sensores = []
 
@@ -11,11 +15,70 @@ class SensorData (BaseModel):
     humedad: float
     aire: float
 
-@app.get("/")
-def inicio():
-    return {
-        "mensaje": "Servidor funcionando"
-    }
+
+
+@app.post("/crearuser")
+def crearuser(
+    nombre: str = Form(...),
+    apellido: str = Form(...),
+    rol: str = Form(...),
+    contrasenia: str = Form(...),
+    institucion: str = Form(...)
+):
+    conexion, cursor = conectar()
+
+    if conexion is None:
+        return {"error": "No se pudo conectar a la base de datos"}
+
+    try:
+        datos = (
+            nombre,
+            apellido,
+            institucion,
+            rol,
+            contrasenia
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO usuarios
+            (Nombre, Apellido, Institucion, Rol, Password)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            datos
+        )
+
+        conexion.commit()
+
+        return {"mensaje": "Usuario insertado correctamente"}
+
+    except Error as e:
+        return {"error": str(e)}
+
+    finally:
+        cursor.close()
+        conexion.close()
+
+
+@app.get("/veruser")
+def verusers():
+    conexion, cursor = conectar()
+
+    if conexion is None:
+        return {"error": "No se pudo conectar a la base de datos"}
+
+    try:
+        cursor.execute("SELECT * FROM usuarios")
+        usuarios = cursor.fetchall()
+
+        return {"usuarios": usuarios}
+
+    except Error as e:
+        return {"error": str(e)}
+
+    finally:
+        cursor.close()
+        conexion.close()
 
 # Aca envia los datos la ESP32
 @app.post("/sensores")
