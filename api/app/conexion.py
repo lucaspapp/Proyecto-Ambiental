@@ -1,28 +1,19 @@
 import mysql.connector
 from mysql.connector import Error
 
-try:
-    connection = mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="",
-        database="temp"
-    )
+def conectar():
+    try:
+        conexion = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="",
+            database="temp"
+        )
 
-    if connection.is_connected():
-        print("Conexión exitosa.")
-        cursor = connection.cursor()
+        if conexion.is_connected():
+            cursor = conexion.cursor()
+            return conexion, cursor
 
-        # Ejecuta todas tus consultas aquí
-        cursor.execute("SELECT * FROM tu_tabla")
-        resultados = cursor.fetchall()
-
-        for fila in resultados:
-            print(fila)
-
-        # Cuando ya no necesites la conexión
-        cursor.close()
-        connection.close()
-
-except Error as e:
-    print(f"Error: {e}")
+    except Error as e:
+        print(f"Error al conectar con MySQL: {e}")
+        return None, None
