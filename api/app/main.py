@@ -15,10 +15,9 @@ class SensorData (BaseModel):
     humedad: float
     aire: float
 
-
-
 @app.post("/crearuser")
 def crearuser(
+    id: int= Form(...),
     nombre: str = Form(...),
     apellido: str = Form(...),
     rol: str = Form(...),
@@ -32,6 +31,7 @@ def crearuser(
 
     try:
         datos = (
+            id
             nombre,
             apellido,
             institucion,
@@ -42,8 +42,8 @@ def crearuser(
         cursor.execute(
             """
             INSERT INTO usuarios
-            (Nombre, Apellido, Institucion, Rol, Password)
-            VALUES (%s, %s, %s, %s, %s)
+            (id_usuario,Nombre, Apellido, Institucion, Rol, Password)
+            VALUES (%s ,%s, %s, %s, %s, %s)
             """,
             datos
         )
@@ -58,6 +58,89 @@ def crearuser(
     finally:
         cursor.close()
         conexion.close()
+
+@app.post("/crearproyecto")
+def crearproyecto(
+    Usuario: str = Form(...),
+    Titulo: str = Form(...),
+    Descripcion: str = Form(...)
+):
+    conexion, cursor = conectar()
+
+    if conexion is None:
+        return {"error": "No se pudo conectar a la base de datos"}
+
+    try:
+        datos = (
+            Usuario,
+            Titulo,
+            Descripcion
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO proyectos
+            (Usuario,Titulo,Descripcion)
+            VALUES (%s, %s, %s)
+            """,
+            datos
+        )
+
+        conexion.commit()
+
+        return {"mensaje": "proyecto insertado correctamente"}
+
+    except Error as e:
+        return {"error": str(e)}
+
+    finally:
+        cursor.close()
+        conexion.close()
+
+@app.post("/crearconfig")
+def crearconfig(
+    Id_proyecto: int = Form(...),
+    Data_mediciones: int = Form(...),
+    Data_guardado: int = Form(...),
+    Nombre: str = Form(...),
+    Descripcion: str = Form(...)
+):
+    conexion, cursor = conectar()
+
+    if conexion is None:
+        return {"error": "No se pudo conectar a la base de datos"}
+
+    try:
+
+        datos = (
+            Id_proyecto,
+            Id_modulo,
+            Data_mediciones,
+            Data_guardado,
+            Nombre,
+            Descripcion
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO conf_modulos
+            (Id_proyecto,Data_mediciones,Data_guardado,Nombre,Descripcion)
+            VALUES (%i, %i, %i,%s,%s)
+            """,
+            datos
+        )
+
+        conexion.commit()
+
+        return {"mensaje": "proyecto insertado correctamente"}
+
+    except Error as e:
+        return {"error": str(e)}
+
+    finally:
+        cursor.close()
+        conexion.close()
+
 
 
 @app.get("/veruser")
@@ -79,6 +162,8 @@ def verusers():
     finally:
         cursor.close()
         conexion.close()
+
+
 
 # Aca envia los datos la ESP32
 @app.post("/sensores")
