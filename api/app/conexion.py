@@ -4,9 +4,10 @@ from mysql.connector import Error
 def conectar():
     try:
         conexion = mysql.connector.connect(
-            host="localhost",
+            host="127.0.0.1",
+            port=3306,
             user="root",
-            password="",
+            password="Alumno",
             database="temp"
         )
 
@@ -16,4 +17,5 @@ def conectar():
 
     except Error as e:
         print(f"Error al conectar con MySQL: {e}")
-        return None, None
+
+    return None, None
