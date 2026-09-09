@@ -1,0 +1,59 @@
+CREATE DATABASE temp;
+USE temp;
+CREATE TABLE usuarios (
+  id_usuario VARCHAR(100) NOT NULL,
+  Nombre VARCHAR(100) NOT NULL,
+  Apellido VARCHAR(100) NOT NULL,
+  Rol ENUM('estudiante', 'profesor') NOT NULL DEFAULT 'estudiante',
+  Password VARCHAR(255) NOT NULL DEFAULT 'estudiantes_2026',
+  PRIMARY KEY (id_usuario)
+); 
+
+CREATE TABLE proyectos (
+  Id_proyecto INT NOT NULL AUTO_INCREMENT,
+  Usuario VARCHAR(100) NOT NULL,
+  Descripcion TEXT,
+  Titulo VARCHAR(200) NOT NULL,
+  PRIMARY KEY (Id_proyecto),
+  CONSTRAINT fk_proyectos_usuario
+    FOREIGN KEY (Usuario) REFERENCES usuarios(id_usuario)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+);
+
+
+CREATE TABLE conf_modulos (
+  Id_modulo INT NOT NULL AUTO_INCREMENT,
+  Id_proyecto INT NOT NULL,
+  Data_mediciones INT NOT NULL,
+  Data_guardado INT NOT NULL,
+  Nombre VARCHAR(150) NOT NULL,
+  Descripcion TEXT,
+  PRIMARY KEY (Id_modulo),
+  CONSTRAINT fk_modulos_proyecto
+    FOREIGN KEY (Id_proyecto) REFERENCES proyectos(Id_proyecto)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);
+
+CREATE TABLE mediciones (
+  Id_medicion BIGINT NOT NULL AUTO_INCREMENT,
+  Id_proyecto INT NOT NULL,
+  Id_modulo INT NOT NULL,
+  Valor DECIMAL(15,4) NOT NULL,
+  Tiempo DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (Id_medicion),
+  CONSTRAINT fk_mediciones_proyecto
+    FOREIGN KEY (Id_proyecto) REFERENCES proyectos(Id_proyecto)
+    ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_mediciones_modulo
+    FOREIGN KEY (Id_modulo) REFERENCES conf_modulos(Id_modulo)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);
+ALTER TABLE usuarios
+MODIFY COLUMN Rol ENUM(
+    'estudiante',
+    'docente',
+    'invitado',
+    'administrador'
+) NOT NULL DEFAULT 'estudiante';
+ALTER TABLE usuarios
+ADD COLUMN Institucion VARCHAR(150) NULL;
