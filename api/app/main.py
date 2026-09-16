@@ -4,6 +4,7 @@ import secrets
 from threading import Lock
 
 from fastapi import FastAPI, Form, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from mysql.connector import Error, IntegrityError
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,6 +15,14 @@ app = FastAPI(
     title="API Proyecto Ambiental",
     description="API para usuarios, proyectos, módulos y mediciones del prototipo ESP32.",
     version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 _datos_sensores: list[dict[str, object]] = []

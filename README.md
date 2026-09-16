@@ -34,7 +34,7 @@ Instala dependencias e inicia el servidor:
 cd api
 python -m pip install -r ..\requirements.text
 cd app
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload
 ```
 
 Direcciones locales:
@@ -262,9 +262,41 @@ La ESP32 debe considerar exitosos los códigos `200` o `201`, reintentar
 errores temporales `503` con espera progresiva y no reenviar indefinidamente
 un payload que haya recibido un `422` o `409`.
 
+## 6. Uso del frontend
+
+El panel web está en `frontend/index.html`. Puede abrirse directamente en el
+navegador o servirse con cualquier servidor de archivos estáticos. Al cargarlo,
+indica en **URL base de la API** la dirección accesible desde el navegador,
+por ejemplo `http://127.0.0.1:8003`, y pulsa **Verificar conexión**.
+
+El frontend actual está organizado como una aplicación multipágina responsive
+(navegación por hash, sin build obligatorio) y utiliza Tailwind CSS y Chart.js
+desde CDN. Incluye:
+
+- ingreso y registro de alumnos y profesores;
+- dashboard con analíticas gráficas y actividad reciente;
+- aula con código para crear o unirse a una clase;
+- sincronización visual de cambios del profesor;
+- carga de módulos y sensores desde la interfaz;
+- sección educativa sobre el proyecto y recursos para dar la clase;
+- panel de administración con listado de usuarios;
+- footer institucional con ayuda, preguntas frecuentes y desarrolladores;
+- formularios para crear usuarios, proyectos y configuraciones de módulos;
+- registro de una tanda de mediciones y consultas a la API.
+
+Para explorar el panel administrativo en la demo local, ingresar con un correo
+que comience con `admin` (por ejemplo `admin@colegio.edu`). Para explorar la
+vista de profesor, usar un correo que comience con `prof`. El resto de los
+correos ingresa como alumno. En producción, este acceso visual debe reemplazarse
+por autenticación real en la API.
+
+La API incluye CORS para permitir el uso del frontend separado durante el
+desarrollo. En un despliegue público conviene servir ambos bajo el mismo
+dominio o reemplazar `allow_origins=["*"]` en `api/app/main.py` por los
+dominios concretos autorizados.
 
 
-## 6. Instalación en Debian
+## 7. Instalación en Debian
 
 ### Instalar paquetes del sistema
 
@@ -388,7 +420,7 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d api.ejemplo.com
 ```
 
-## 7. Verificación del despliegue
+## 8. Verificación del despliegue
 
 Desde el servidor:
 
