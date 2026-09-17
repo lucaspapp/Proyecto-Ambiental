@@ -53,6 +53,25 @@ class SensorData(BaseModel):
     mediciones: list[SensorMeasurement] = Field(..., min_length=1, max_length=100)
 
 
+class DeviceSensorConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id_ts: int = Field(..., gt=0)
+    t_registro: str = Field("00:05:00", pattern=r"^\d{2}:\d{2}:\d{2}$")
+    t_muestra: str = Field("00:00:30", pattern=r"^\d{2}:\d{2}:\d{2}$")
+    descripcion: str = Field("", max_length=1000)
+
+
+class DeviceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str = Field(..., min_length=1, max_length=150)
+    data_mediciones: int = Field(..., ge=0)
+    data_guardado: int = Field(..., ge=0)
+    descripcion: str = Field("", max_length=5000)
+    sensores: list[DeviceSensorConfig] = Field(..., min_length=1, max_length=50)
+
+
 def _error_db(error: Error) -> HTTPException:
     if isinstance(error, IntegrityError):
         return HTTPException(
@@ -138,7 +157,7 @@ def crearconfig(
                 """
                 INSERT INTO conf_modulos
                     (Id_proyecto, Data_mediciones, Data_guardado, Nombre, Descripcion)
-                VALUES (%s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (Id_proyecto, Data_mediciones, Data_guardado, Nombre.strip(), Descripcion.strip()),
             )
@@ -147,6 +166,117 @@ def crearconfig(
             raise _error_db(error) from error
         raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
     return {"mensaje": "Configuración creada correctamente"}
+
+
+@app.post("/proyectos/{id_proyecto}/dispositivos", status_code=status.HTTP_201_CREATED)
+def crear_dispositivo(id_proyecto: int, dispositivo: DeviceConfig) -> dict[str, object]:
+    try:
+        with conexion_db() as (_, cursor):
+            cursor.execute(
+                "SELECT Id_proyecto FROM proyectos WHERE Id_proyecto = %s",
+                (id_proyecto,),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="El aula no existe.")
+
+            cursor.execute(
+                """
+                INSERT INTO conf_modulos
+                    (Id_proyecto, Data_mediciones, Data_guardado, Nombre, Descripcion)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    id_proyecto,
+                    dispositivo.data_mediciones,
+                    dispositivo.data_guardado,
+                    dispositivo.nombre.strip(),
+                    dispositivo.descripcion.strip(),
+                ),
+            )
+            modulo_id = cursor.lastrowid
+            cursor.executemany(
+                """
+                INSERT INTO sensores_proyecto
+                    (id_proyecto, Id_modulo, id_ts, t_registro, t_muestra, descripcion)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                [
+                    (
+                        id_proyecto,
+                        modulo_id,
+                        sensor.id_ts,
+                        sensor.t_registro,
+                        sensor.t_muestra,
+                        sensor.descripcion.strip(),
+                    )
+                    for sensor in dispositivo.sensores
+                ],
+            )
+            return {
+                "id_modulo": modulo_id,
+                "id_proyecto": id_proyecto,
+                "nombre": dispositivo.nombre.strip(),
+                "cantidad_sensores": len(dispositivo.sensores),
+            }
+    except HTTPException:
+        raise
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+
+
+@app.get("/proyectos/{id_proyecto}/dispositivos")
+def listar_dispositivos(id_proyecto: int) -> dict[str, list[dict[str, object]]]:
+    try:
+        with conexion_db() as (_, cursor):
+            cursor.execute(
+                """
+                SELECT m.Id_modulo, m.Nombre, m.Data_mediciones, m.Data_guardado,
+                       m.Descripcion, s.id_sp, s.id_ts, s.t_registro,
+                       s.t_muestra, s.descripcion AS sensor_descripcion,
+                       t.nombre AS tipo_sensor
+                FROM conf_modulos AS m
+                LEFT JOIN sensores_proyecto AS s
+                    ON s.id_proyecto = m.Id_proyecto AND s.Id_modulo = m.Id_modulo
+                LEFT JOIN tipo_sensor AS t ON t.id_ts = s.id_ts
+                WHERE m.Id_proyecto = %s
+                ORDER BY m.Id_modulo, s.id_sp
+                """,
+                (id_proyecto,),
+            )
+            rows = cursor.fetchall()
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+
+    dispositivos: dict[int, dict[str, object]] = {}
+    for row in rows:
+        modulo_id = int(row["Id_modulo"])
+        dispositivo = dispositivos.setdefault(
+            modulo_id,
+            {
+                "id_modulo": modulo_id,
+                "nombre": row["Nombre"],
+                "data_mediciones": row["Data_mediciones"],
+                "data_guardado": row["Data_guardado"],
+                "descripcion": row["Descripcion"],
+                "sensores": [],
+            },
+        )
+        if row["id_sp"] is not None:
+            dispositivo["sensores"].append(
+                {
+                    "id_sp": row["id_sp"],
+                    "id_ts": row["id_ts"],
+                    "tipo": row["tipo_sensor"],
+                    "t_registro": row["t_registro"],
+                    "t_muestra": row["t_muestra"],
+                    "descripcion": row["sensor_descripcion"],
+                }
+            )
+    return {"dispositivos": list(dispositivos.values())}
 
 
 @app.get("/veruser")
@@ -177,9 +307,10 @@ def recibir_datos(datos: SensorData) -> dict[str, object]:
                 f"""
                 SELECT id_sp
                 FROM sensores_proyecto
-                WHERE id_proyecto = %s AND id_sp IN ({placeholders})
+                WHERE id_proyecto = %s AND Id_modulo = %s
+                  AND id_sp IN ({placeholders})
                 """,
-                [datos.id_proyecto, *sensor_ids],
+                [datos.id_proyecto, datos.id_modulo, *sensor_ids],
             )
             sensores_validos = {fila["id_sp"] for fila in cursor.fetchall()}
             sensores_invalidos = sorted(set(sensor_ids) - sensores_validos)

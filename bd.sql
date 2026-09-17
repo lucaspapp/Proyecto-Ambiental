@@ -76,6 +76,7 @@ CREATE TABLE `proyectos` (
 CREATE TABLE `sensores_proyecto` (
   `id_sp` int(11) NOT NULL,
   `id_proyecto` int(11) NOT NULL,
+  `Id_modulo` int(11) NOT NULL,
   `id_ts` int(11) NOT NULL,
   `t_registro` time NOT NULL DEFAULT '00:05:00',
   `t_muestra` time NOT NULL DEFAULT '00:00:30',
@@ -143,7 +144,8 @@ ALTER TABLE `proyectos`
 ALTER TABLE `sensores_proyecto`
   ADD PRIMARY KEY (`id_sp`),
   ADD KEY `id_ts` (`id_ts`),
-  ADD KEY `id_proyecto` (`id_proyecto`);
+  ADD KEY `id_proyecto` (`id_proyecto`),
+  ADD KEY `fk_sensores_modulo` (`Id_modulo`);
 
 --
 -- Indices de la tabla `tipo_sensor`
@@ -221,6 +223,8 @@ ALTER TABLE `proyectos`
 ALTER TABLE `sensores_proyecto`
   ADD CONSTRAINT `sensores_proyecto_ibfk_1` FOREIGN KEY (`id_ts`) REFERENCES `tipo_sensor` (`id_ts`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `sensores_proyecto_ibfk_2` FOREIGN KEY (`id_proyecto`) REFERENCES `proyectos` (`Id_proyecto`) ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE `sensores_proyecto`
+  ADD CONSTRAINT `fk_sensores_modulo` FOREIGN KEY (`Id_modulo`) REFERENCES `conf_modulos` (`Id_modulo`) ON DELETE CASCADE ON UPDATE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

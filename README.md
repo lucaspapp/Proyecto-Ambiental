@@ -46,7 +46,18 @@ Direcciones locales:
 
 Para producción no uses `--reload`.
 
-## 3. Respuestas y errores
+## 3. Frontend estático
+
+El archivo [`frontend/index.html`](frontend/index.html) puede publicarse
+directamente en cualquier hosting estático. El registro de cuentas, la
+administración y las mediciones de demostración se guardan en el
+`localStorage` del navegador, por lo que la página no necesita que la API esté
+disponible para navegar ni para crear una cuenta de prueba.
+
+La API queda disponible para integraciones reales con la ESP32 y para una
+futura persistencia centralizada de usuarios y proyectos.
+
+## 4. Respuestas y errores
 
 Las respuestas exitosas usan JSON. Los errores de validación usan `422`;
 un recurso duplicado o una referencia inválida puede devolver `409`; una
@@ -61,7 +72,7 @@ Ejemplo de error:
 }
 ```
 
-## 4. Endpoints para el frontend
+## 5. Endpoints para el frontend
 
 ### Estado de la API
 
@@ -177,7 +188,7 @@ if (respuesta.status === 404) {
 La última tanda se mantiene en memoria del proceso y se pierde al reiniciar la
 API. El historial persistente queda en la tabla `mediciones`.
 
-## 5. Endpoint para la ESP32
+## 6. Endpoint para la ESP32
 
 ### Registrar mediciones
 
