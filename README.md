@@ -1,460 +1,173 @@
-# API Proyecto Ambiental
+# EcoLab - Proyecto Ambiental
 
-API HTTP construida con FastAPI para conectar el frontend y la ESP32 con la
-base de datos MariaDB/MySQL del proyecto. Permite crear usuarios, proyectos,
-configurar módulos y registrar mediciones asociadas a sensores de proyecto.
+EcoLab es una plataforma para escuelas que usan un microcontrolador (por
+ejemplo, una ESP32) con sensores. El docente crea un aula, configura los
+dispositivos y los alumnos se unen con un código. Las mediciones quedan
+disponibles para trabajar en clase.
 
-## 1. Requisitos
+## Estructura
 
-- Python 3.10 o superior.
-- MariaDB/MySQL con la estructura entregada en `bd.sql`.
-- La base de datos debe llamarse `cnlab` (o debe indicarse otro nombre en
-  `DB_NAME`).
-- La ESP32 y el frontend deben poder alcanzar la dirección IP y el puerto de
-  la API.
-
-La API no crea ni modifica tablas. Primero debe importarse `bd.sql` en el
-servidor de base de datos.
-
-## 2. Configuración local
-
-Desde `api/app`, define las variables de conexión:
-
-```powershell
-$env:DB_HOST="127.0.0.1"
-$env:DB_PORT="3306"
-$env:DB_USER="cnlab_user"
-$env:DB_PASSWORD="contraseña_segura"
-$env:DB_NAME="cnlab"
+```text
+api/
+  .env                 Configuración local de la API y MySQL/MariaDB
+  run.py               Arranque del servidor
+  app/main.py          Endpoints FastAPI
+  app/conexion.py      Conexión a la base de datos
+frontend/
+  index.html           Estructura y estilos de la aplicación
+  script.js            Lógica del frontend
+bd.sql                 Tablas iniciales de la base de datos
+requirements.text      Dependencias de Python
 ```
 
-Instala dependencias e inicia el servidor:
+## 1. Preparar la base de datos
+
+1. Instala e inicia MySQL o MariaDB.
+2. Crea una base llamada `cnlab`.
+3. Importa [`bd.sql`](bd.sql). El archivo crea las tablas que necesita la API.
+4. Ten a mano el usuario y la contraseña de esa base.
+
+Ejemplo desde una consola de MySQL:
+
+```sql
+CREATE DATABASE cnlab CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+```
+
+Luego importa el archivo `bd.sql` desde phpMyAdmin o con el cliente de MySQL.
+Si ya tenías una instalación anterior que no incluía las aulas, la API crea
+automáticamente `aulas` y `aula_miembros` cuando se abre la sección **Mi
+clase**.
+
+## 2. Iniciar la API en Windows
+
+Abre una terminal en la carpeta del proyecto:
 
 ```powershell
 cd api
-python -m pip install -r ..\requirements.text
-cd app
-python -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload
+python -m venv ..\.venv
+..\.venv\Scripts\python.exe -m pip install -r ..\requirements.text
 ```
 
-Direcciones locales:
+Edita [`api/.env`](api/.env) con los datos de MySQL:
 
-- API: `http://127.0.0.1:8003`
-- Documentación Swagger: `http://127.0.0.1:8003/docs`
-- Documentación ReDoc: `http://127.0.0.1:8003/redoc`
-- Estado: `http://127.0.0.1:8003/health`
+```dotenv
+API_HOST=0.0.0.0
+API_PORT=8003
+API_RELOAD=true
 
-Para producción no uses `--reload`.
-
-## 3. Frontend estático
-
-El archivo [`frontend/index.html`](frontend/index.html) puede publicarse
-directamente en cualquier hosting estático. El registro de cuentas, la
-administración y las mediciones de demostración se guardan en el
-`localStorage` del navegador, por lo que la página no necesita que la API esté
-disponible para navegar ni para crear una cuenta de prueba.
-
-La API queda disponible para integraciones reales con la ESP32 y para una
-futura persistencia centralizada de usuarios y proyectos.
-
-## 4. Respuestas y errores
-
-Las respuestas exitosas usan JSON. Los errores de validación usan `422`;
-un recurso duplicado o una referencia inválida puede devolver `409`; una
-medición cuyo `id_sp` no pertenece al proyecto devuelve `422`; y un problema
-de conexión con la base de datos devuelve `503`.
-
-Ejemplo de error:
-
-```json
-{
-  "detail": "Los sensores no pertenecen al proyecto: 8"
-}
-```
-
-## 5. Endpoints para el frontend
-
-### Estado de la API
-
-```http
-GET /health
-```
-
-Respuesta:
-
-```json
-{"status": "ok"}
-```
-
-### Crear usuario
-
-`POST /crearuser` recibe `multipart/form-data`.
-
-Campos:
-
-| Campo | Tipo | Obligatorio |
-|---|---|---|
-| `id` | texto, máximo 100 | sí |
-| `nombre` | texto, máximo 100 | sí |
-| `apellido` | texto, máximo 100 | sí |
-| `rol` | `estudiante`, `docente`, `invitado` o `administrador` | no |
-| `contrasenia` | texto de 8 a 255 caracteres | sí |
-| `institucion` | texto, máximo 150 | no |
-
-Ejemplo con JavaScript:
-
-```js
-const formulario = new FormData();
-formulario.append("id", "alumno-001");
-formulario.append("nombre", "Ana");
-formulario.append("apellido", "Perez");
-formulario.append("rol", "estudiante");
-formulario.append("contrasenia", "una-clave-segura");
-formulario.append("institucion", "Escuela 1");
-
-const respuesta = await fetch("http://10.5.10.11:8003/crearuser", {
-  method: "POST",
-  body: formulario
-});
-
-const datos = await respuesta.json();
-if (!respuesta.ok) throw new Error(datos.detail ?? "No se pudo crear el usuario");
-console.log(datos);
-```
-
-Respuesta `201`:
-
-```json
-{"mensaje": "Usuario creado correctamente"}
-```
-
-### Crear proyecto
-
-`POST /crearproyecto` recibe `multipart/form-data`.
-
-```js
-const formulario = new FormData();
-formulario.append("Usuario", "alumno-001");
-formulario.append("Titulo", "Calidad del aire");
-formulario.append("Descripcion", "Mediciones del laboratorio");
-
-const respuesta = await fetch("http://10.5.10.11:8003/crearproyecto", {
-  method: "POST",
-  body: formulario
-});
-const datos = await respuesta.json();
-```
-
-### Crear configuración de módulo
-
-`POST /crearconfig` recibe `multipart/form-data`.
-
-```js
-const formulario = new FormData();
-formulario.append("Id_proyecto", "1");
-formulario.append("Data_mediciones", "60");
-formulario.append("Data_guardado", "300");
-formulario.append("Nombre", "Módulo ambiental");
-formulario.append("Descripcion", "Sensores conectados a la ESP32");
-
-const respuesta = await fetch("http://10.5.10.11:8003/crearconfig", {
-  method: "POST",
-  body: formulario
-});
-console.log(await respuesta.json());
-```
-
-### Listar usuarios
-
-```js
-const respuesta = await fetch("http://10.5.10.11:8003/veruser");
-const datos = await respuesta.json();
-console.log(datos.usuarios);
-```
-
-La API no devuelve contraseñas en este endpoint.
-
-### Obtener la última tanda recibida
-
-```js
-const respuesta = await fetch("http://10.5.10.11:8003/sensores/actual");
-if (respuesta.status === 404) {
-  console.log("Todavía no hay mediciones");
-} else {
-  console.log(await respuesta.json());
-}
-```
-
-La última tanda se mantiene en memoria del proceso y se pierde al reiniciar la
-API. El historial persistente queda en la tabla `mediciones`.
-
-## 6. Endpoint para la ESP32
-
-### Registrar mediciones
-
-La ESP32 debe llamar:
-
-```http
-POST /sensores
-Content-Type: application/json
-```
-
-Payload recomendado:
-
-```json
-{
-  "id_proyecto": 1,
-  "id_modulo": 2,
-  "mediciones": [
-    {"id_sp": 5, "valor": 22.5},
-    {"id_sp": 6, "valor": 60.0},
-    {"id_sp": 7, "valor": 3.2}
-  ]
-}
-```
-
-Cada `id_sp` debe existir en `sensores_proyecto` y pertenecer a
-`id_proyecto`. El `id_modulo` también debe existir en `conf_modulos`.
-La API inserta una fila por cada elemento en `mediciones`, dentro de una única
-transacción.
-
-Respuesta `201`:
-
-```json
-{
-  "ok": true,
-  "mensaje": "Mediciones guardadas",
-  "cantidad": 3,
-  "fecha": "2026-09-10T12:00:00+00:00"
-}
-```
-
-Ejemplo equivalente con `curl`:
-
-```bash
-curl -X POST http://10.5.10.11:8003/sensores \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id_proyecto": 1,
-    "id_modulo": 2,
-    "mediciones": [
-      {"id_sp": 5, "valor": 22.5},
-      {"id_sp": 6, "valor": 60.0}
-    ]
-  }'
-```
-
-Ejemplo mínimo para Arduino/ESP32 usando `HTTPClient`:
-
-```cpp
-#include <HTTPClient.h>
-#include <WiFi.h>
-
-HTTPClient http;
-http.begin("http://10.5.10.11:8003/sensores");
-http.addHeader("Content-Type", "application/json");
-
-String body = R"({
-  "id_proyecto": 1,
-  "id_modulo": 2,
-  "mediciones": [
-    {"id_sp": 5, "valor": 22.5},
-    {"id_sp": 6, "valor": 60.0}
-  ]
-})";
-
-int codigo = http.POST(body);
-String respuesta = http.getString();
-Serial.printf("HTTP %d: %s\n", codigo, respuesta.c_str());
-http.end();
-```
-
-La ESP32 debe considerar exitosos los códigos `200` o `201`, reintentar
-errores temporales `503` con espera progresiva y no reenviar indefinidamente
-un payload que haya recibido un `422` o `409`.
-
-## 6. Uso del frontend
-
-El panel web está en `frontend/index.html`. Puede abrirse directamente en el
-navegador o servirse con cualquier servidor de archivos estáticos. Al cargarlo,
-indica en **URL base de la API** la dirección accesible desde el navegador,
-por ejemplo `http://127.0.0.1:8003`, y pulsa **Verificar conexión**.
-
-El frontend actual está organizado como una aplicación multipágina responsive
-(navegación por hash, sin build obligatorio) y utiliza Tailwind CSS y Chart.js
-desde CDN. Incluye:
-
-- ingreso y registro de alumnos y profesores;
-- dashboard con analíticas gráficas y actividad reciente;
-- aula con código para crear o unirse a una clase;
-- sincronización visual de cambios del profesor;
-- carga de módulos y sensores desde la interfaz;
-- sección educativa sobre el proyecto y recursos para dar la clase;
-- panel de administración con listado de usuarios;
-- footer institucional con ayuda, preguntas frecuentes y desarrolladores;
-- formularios para crear usuarios, proyectos y configuraciones de módulos;
-- registro de una tanda de mediciones y consultas a la API.
-
-Para explorar el panel administrativo en la demo local, ingresar con un correo
-que comience con `admin` (por ejemplo `admin@colegio.edu`). Para explorar la
-vista de profesor, usar un correo que comience con `prof`. El resto de los
-correos ingresa como alumno. En producción, este acceso visual debe reemplazarse
-por autenticación real en la API.
-
-La API incluye CORS para permitir el uso del frontend separado durante el
-desarrollo. En un despliegue público conviene servir ambos bajo el mismo
-dominio o reemplazar `allow_origins=["*"]` en `api/app/main.py` por los
-dominios concretos autorizados.
-
-
-## 7. Instalación en Debian
-
-### Instalar paquetes del sistema
-
-```bash
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip git nginx
-```
-
-### Copiar el proyecto y crear el entorno virtual
-
-```bash
-sudo mkdir -p /opt/proyecto-ambiental
-sudo chown -R "$USER":"$USER" /opt/proyecto-ambiental
-git clone URL_DEL_REPOSITORIO /opt/proyecto-ambiental
-cd /opt/proyecto-ambiental
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.text
-```
-
-Si el proyecto ya está copiado, omite `git clone`.
-
-### Configurar variables de entorno
-
-```bash
-sudo nano /etc/proyecto-ambiental.env
-```
-
-Contenido:
-
-```text
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_USER=cnlab_user
-DB_PASSWORD=CAMBIAR_POR_UNA_CLAVE_SEGURA
+DB_USER=root
+DB_PASSWORD=
 DB_NAME=cnlab
 ```
 
-Protege el archivo:
+`DB_PASSWORD` puede quedar vacío si tu instalación local de MySQL no usa
+contraseña. En una instalación compartida o de producción, usa una contraseña
+segura.
 
-```bash
-sudo chown root:root /etc/proyecto-ambiental.env
-sudo chmod 600 /etc/proyecto-ambiental.env
+Inicia la API:
+
+```powershell
+..\.venv\Scripts\python.exe run.py
 ```
 
-### Crear el servicio systemd
+Comprueba que funciona:
 
-```bash
-sudo nano /etc/systemd/system/proyecto-ambiental.service
+- API: <http://127.0.0.1:8003>
+- Swagger: <http://127.0.0.1:8003/docs>
+- Estado: <http://127.0.0.1:8003/health>
+
+## 3. Abrir el frontend
+
+Con la API iniciada, abre [`frontend/index.html`](frontend/index.html) en el
+navegador. Si la API está en otra computadora, cambia `API_PUBLIC_URL` en
+`api/.env` por una dirección accesible desde la red, por ejemplo:
+
+```dotenv
+API_PUBLIC_URL=http://192.168.1.50:8003
 ```
 
-```ini
-[Unit]
-Description=API Proyecto Ambiental
-After=network.target
+También puedes indicar la dirección desde la consola del navegador:
 
-[Service]
-User=www-data
-Group=www-data
-WorkingDirectory=/opt/proyecto-ambiental/api/app
-EnvironmentFile=/etc/proyecto-ambiental.env
-ExecStart=/opt/proyecto-ambiental/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+```js
+localStorage.setItem("ecolab_api_url", "http://192.168.1.50:8003");
+location.reload();
 ```
 
-Asegura que `www-data` pueda leer el proyecto:
+## 4. Crear usuarios y aulas
 
-```bash
-sudo chown -R www-data:www-data /opt/proyecto-ambiental
-sudo systemctl daemon-reload
-sudo systemctl enable --now proyecto-ambiental
-sudo systemctl status proyecto-ambiental
-```
+1. En el frontend selecciona **Crear cuenta**.
+2. Completa nombre, apellido, correo, rol y una contraseña de al menos 8
+   caracteres.
+3. Inicia sesión.
+4. Un docente o administrador puede crear un aula desde **Mi clase**.
+5. Comparte el código del aula para que los alumnos se unan.
+6. Desde **Sensores**, configura el dispositivo y los sensores del aula.
 
-Ver logs:
+El registro usa `POST /crearuser` con `multipart/form-data`. La contraseña se
+almacena como hash y nunca se devuelve en las respuestas.
 
-```bash
-sudo journalctl -u proyecto-ambiental -f
-```
+## 5. Conectar una ESP32
 
-### Configurar Nginx como proxy
+La ESP32 envía una tanda de mediciones a `POST /sensores`:
 
-```bash
-sudo nano /etc/nginx/sites-available/proyecto-ambiental
-```
-
-```nginx
-server {
-    listen 80;
-    server_name api.ejemplo.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
+```json
+{
+  "id_proyecto": 1,
+  "id_modulo": 2,
+  "mediciones": [
+    { "id_sp": 5, "valor": 22.5 },
+    { "id_sp": 6, "valor": 60.0 }
+  ]
 }
 ```
 
-Activar el sitio:
+La petición debe usar `Content-Type: application/json`. Cada `id_sp` debe
+existir en `sensores_proyecto` y pertenecer al proyecto indicado.
 
-```bash
-sudo ln -s /etc/nginx/sites-available/proyecto-ambiental /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-```
+## Solución rápida del error `503` al crear un usuario
 
-Después, la URL pública será `http://api.ejemplo.com`. Para producción se
-recomienda habilitar HTTPS con Certbot:
+El `503` significa que la API no pudo completar la operación con MySQL/MariaDB.
 
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d api.ejemplo.com
-```
+1. Comprueba que MySQL/MariaDB esté iniciado.
+2. Revisa `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` y `DB_NAME` en
+   [`api/.env`](api/.env).
+3. Confirma que importaste `bd.sql` en la base `cnlab`.
+4. Abre <http://127.0.0.1:8003/health> para confirmar que la API está viva.
+5. Mira la terminal donde ejecutaste `run.py`: ahora el mensaje distingue
+   entre servicio apagado, credenciales incorrectas y base inexistente.
 
-## 8. Verificación del despliegue
+Si aparece `Ya existe una cuenta`, utiliza otro correo: `id_usuario` es único.
 
-Desde el servidor:
+### Error al crear una clase
 
-```bash
-curl http://127.0.0.1:8000/health
-```
+Si ves `No fue posible completar la operación con la base de datos`, reinicia
+la API y vuelve a abrir **Mi clase**. La API actual crea las tablas
+colaborativas que faltaban en bases antiguas. Si el error continúa, confirma
+que el usuario que inició sesión tenga rol `docente` o `administrador` y que
+su correo exista en la tabla `usuarios`.
 
-Desde otro equipo de la red:
+## Endpoints principales
 
-```bash
-curl http://IP_DEL_SERVIDOR/health
-```
+| Método | Ruta | Uso |
+| --- | --- | --- |
+| `POST` | `/crearuser` | Crear un usuario |
+| `POST` | `/auth/login` | Iniciar sesión |
+| `GET` | `/aulas` | Listar aulas |
+| `POST` | `/aulas` | Crear un aula |
+| `POST` | `/aulas/unirse` | Unirse con un código |
+| `GET` | `/aulas/{id_aula}/miembros` | Ver integrantes |
+| `POST` | `/sensores` | Guardar mediciones de la ESP32 |
+| `GET` | `/sensores/actual` | Consultar la última tanda |
 
-La respuesta esperada es:
+Para ver todos los campos y probar las rutas, usa Swagger en `/docs`.
 
-```json
-{"status": "ok"}
-```
+## Uso en una red escolar
 
-Si falla, revisar en este orden:
+Configura `API_HOST=0.0.0.0`, permite el puerto `8003` en el firewall y usa la
+IP de la computadora que ejecuta la API en `API_PUBLIC_URL`. Los equipos de
+los alumnos deben estar en la misma red y poder acceder a esa IP.
 
-1. `sudo systemctl status proyecto-ambiental`.
-2. `sudo journalctl -u proyecto-ambiental -n 100`.
-3. Las variables de `/etc/proyecto-ambiental.env`.
-4. La conexión del servidor a MariaDB/MySQL.
-5. `sudo nginx -t` y los logs de Nginx.
+Para producción, desactiva `API_RELOAD`, restringe los orígenes CORS en
+`api/app/main.py` y usa credenciales de base de datos con permisos mínimos.

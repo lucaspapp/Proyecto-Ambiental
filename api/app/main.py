@@ -3,7 +3,7 @@ import hashlib
 import secrets
 from threading import Lock
 
-from fastapi import FastAPI, Form, HTTPException, status
+from fastapi import FastAPI, Form, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from mysql.connector import Error, IntegrityError
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,7 +13,7 @@ from conexion import conexion_db
 
 app = FastAPI(
     title="API Proyecto Ambiental",
-    description="API para usuarios, proyectos, módulos y mediciones del prototipo ESP32.",
+    description="API para usuarios, aulas, proyectos, módulos y mediciones del prototipo ESP32.",
     version="1.0.0",
 )
 
@@ -28,6 +28,46 @@ app.add_middleware(
 _datos_sensores: list[dict[str, object]] = []
 _sensores_lock = Lock()
 _MAX_MEDICIONES_EN_MEMORIA = 1000
+
+
+def _asegurar_tablas_aulas(cursor: object) -> None:
+    """Crea las tablas colaborativas si se importó una versión anterior de bd.sql."""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS aulas (
+            id_aula INT NOT NULL AUTO_INCREMENT,
+            nombre VARCHAR(150) NOT NULL,
+            descripcion TEXT NULL,
+            codigo VARCHAR(20) NOT NULL,
+            propietario VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+            creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id_aula),
+            UNIQUE KEY uq_aulas_codigo (codigo),
+            KEY fk_aulas_propietario (propietario),
+            CONSTRAINT fk_aulas_propietario
+                FOREIGN KEY (propietario) REFERENCES usuarios (id_usuario)
+                ON DELETE CASCADE ON UPDATE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS aula_miembros (
+            id_aula INT NOT NULL,
+            id_usuario VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+            rol_aula ENUM('propietario', 'miembro') NOT NULL DEFAULT 'miembro',
+            unido_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (id_aula, id_usuario),
+            KEY fk_aula_miembros_usuario (id_usuario),
+            CONSTRAINT fk_aula_miembros_aula
+                FOREIGN KEY (id_aula) REFERENCES aulas (id_aula)
+                ON DELETE CASCADE ON UPDATE CASCADE,
+            CONSTRAINT fk_aula_miembros_usuario
+                FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario)
+                ON DELETE CASCADE ON UPDATE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """
+    )
 
 
 def _hash_password(password: str) -> str:
@@ -72,16 +112,124 @@ class DeviceConfig(BaseModel):
     sensores: list[DeviceSensorConfig] = Field(..., min_length=1, max_length=50)
 
 
+_ROLES_VALIDOS = {"estudiante", "docente", "invitado", "administrador"}
+
+
+class AulaCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str = Field(..., min_length=1, max_length=150)
+    descripcion: str = Field("", max_length=5000)
+    usuario: str = Field(..., min_length=1, max_length=100)
+    rol: str = Field(..., min_length=1, max_length=20)
+
+
+class AulaJoin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    codigo: str = Field(..., min_length=4, max_length=20)
+    usuario: str = Field(..., min_length=1, max_length=100)
+    rol: str = Field(..., min_length=1, max_length=20)
+
+
+class LoginData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    usuario: str = Field(..., min_length=1, max_length=100)
+    contrasenia: str = Field(..., min_length=1, max_length=255)
+
+
+def _verificar_password(password: str, almacenada: str) -> bool:
+    try:
+        algoritmo, iteraciones, salt_hex, digest_hex = almacenada.split("$")
+        if algoritmo != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt_hex),
+            int(iteraciones),
+        )
+        return secrets.compare_digest(digest.hex(), digest_hex)
+    except (TypeError, ValueError):
+        return False
+
+
+def _validar_usuario(cursor: object, usuario: str, rol: str) -> None:
+    if rol not in _ROLES_VALIDOS:
+        raise HTTPException(status_code=422, detail="Rol no válido.")
+    cursor.execute(
+        "SELECT Rol FROM usuarios WHERE id_usuario = %s",
+        (usuario.strip(),),
+    )
+    fila = cursor.fetchone()
+    if fila is None:
+        raise HTTPException(status_code=401, detail="El usuario no existe.")
+    if fila["Rol"] != rol:
+        raise HTTPException(
+            status_code=403,
+            detail="El rol recibido no coincide con el rol del usuario.",
+        )
+
+
+def _codigo_aula() -> str:
+    return secrets.token_hex(4).upper()
+
+
 def _error_db(error: Error) -> HTTPException:
     if isinstance(error, IntegrityError):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="El recurso ya existe o referencia datos inexistentes.",
         )
+    if getattr(error, "errno", None) in {1045, 1049}:
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No se pudo autenticar con la base de datos. Revisa DB_USER, DB_PASSWORD y DB_NAME.",
+        )
+    if getattr(error, "errno", None) in {2003, 2005}:
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No se pudo conectar con MySQL/MariaDB. Revisa que el servicio esté iniciado y que DB_HOST y DB_PORT sean correctos.",
+        )
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="No fue posible completar la operación con la base de datos.",
     )
+
+
+@app.post("/auth/login")
+def login(datos: LoginData) -> dict[str, object]:
+    try:
+        with conexion_db() as (_, cursor):
+            cursor.execute(
+                """
+                SELECT id_usuario, Nombre, Apellido, Institucion, Rol, Password
+                FROM usuarios
+                WHERE id_usuario = %s
+                """,
+                (datos.usuario.strip().lower(),),
+            )
+            usuario = cursor.fetchone()
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+
+    if usuario is None or not _verificar_password(
+        datos.contrasenia, usuario["Password"]
+    ):
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
+
+    return {
+        "usuario": {
+            "id": usuario["id_usuario"],
+            "nombre": usuario["Nombre"],
+            "apellido": usuario["Apellido"],
+            "institucion": usuario["Institucion"],
+            "role": usuario["Rol"],
+        }
+    }
 
 
 @app.get("/", include_in_schema=False)
@@ -122,6 +270,218 @@ def crearuser(
             raise _error_db(error) from error
         raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
     return {"mensaje": "Usuario creado correctamente"}
+
+
+@app.post("/aulas", status_code=status.HTTP_201_CREATED)
+def crear_aula(aula: AulaCreate) -> dict[str, object]:
+    nombre = aula.nombre.strip()
+    descripcion = aula.descripcion.strip()
+    usuario = aula.usuario.strip()
+    if aula.rol not in {"docente", "administrador"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo docentes y administradores pueden crear aulas.",
+        )
+
+    try:
+        with conexion_db() as (_, cursor):
+            _asegurar_tablas_aulas(cursor)
+            _validar_usuario(cursor, usuario, aula.rol)
+            codigo = _codigo_aula()
+            cursor.execute(
+                """
+                INSERT INTO aulas (nombre, descripcion, codigo, propietario)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (nombre, descripcion, codigo, usuario),
+            )
+            id_aula = cursor.lastrowid
+            cursor.execute(
+                """
+                INSERT INTO aula_miembros (id_aula, id_usuario, rol_aula)
+                VALUES (%s, %s, 'propietario')
+                """,
+                (id_aula, usuario),
+            )
+    except HTTPException:
+        raise
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+
+    return {
+        "id_aula": id_aula,
+        "nombre": nombre,
+        "descripcion": descripcion,
+        "codigo": codigo,
+        "propietario": usuario,
+    }
+
+
+@app.get("/aulas")
+def listar_aulas(
+    usuario: str | None = Query(default=None, min_length=1, max_length=100),
+    rol: str | None = Query(default=None, min_length=1, max_length=20),
+) -> dict[str, list[dict[str, object]]]:
+    if (usuario is None) != (rol is None):
+        raise HTTPException(
+            status_code=422,
+            detail="usuario y rol deben enviarse juntos.",
+        )
+    try:
+        with conexion_db() as (_, cursor):
+            _asegurar_tablas_aulas(cursor)
+            if usuario is None:
+                cursor.execute(
+                    """
+                    SELECT a.id_aula, a.nombre, a.descripcion, a.codigo,
+                           a.propietario, a.creado_en,
+                           COUNT(am.id_usuario) AS cantidad_miembros
+                    FROM aulas AS a
+                    LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula
+                    GROUP BY a.id_aula
+                    ORDER BY a.id_aula DESC
+                    """
+                )
+            else:
+                _validar_usuario(cursor, usuario, rol or "")
+                cursor.execute(
+                    """
+                    SELECT a.id_aula, a.nombre, a.descripcion, a.codigo,
+                           a.propietario, a.creado_en,
+                           COUNT(total.id_usuario) AS cantidad_miembros
+                    FROM aulas AS a
+                    INNER JOIN aula_miembros AS propios
+                        ON propios.id_aula = a.id_aula
+                       AND propios.id_usuario = %s
+                    LEFT JOIN aula_miembros AS total ON total.id_aula = a.id_aula
+                    GROUP BY a.id_aula
+                    ORDER BY a.id_aula DESC
+                    """,
+                    (usuario.strip(),),
+                )
+            aulas = cursor.fetchall()
+    except HTTPException:
+        raise
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+    return {"aulas": aulas}
+
+
+@app.get("/aulas/{id_aula}")
+def ver_aula(
+    id_aula: int,
+    usuario: str | None = Query(default=None, min_length=1, max_length=100),
+    rol: str | None = Query(default=None, min_length=1, max_length=20),
+) -> dict[str, object]:
+    if (usuario is None) != (rol is None):
+        raise HTTPException(status_code=422, detail="usuario y rol deben enviarse juntos.")
+    try:
+        with conexion_db() as (_, cursor):
+            _asegurar_tablas_aulas(cursor)
+            if usuario is not None:
+                _validar_usuario(cursor, usuario, rol or "")
+            cursor.execute("SELECT id_aula FROM aulas WHERE id_aula = %s", (id_aula,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="El aula no existe.")
+            cursor.execute(
+                """
+                SELECT a.id_aula, a.nombre, a.descripcion, a.codigo,
+                       a.propietario, a.creado_en,
+                       COUNT(am.id_usuario) AS cantidad_miembros
+                FROM aulas AS a
+                LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula
+                WHERE a.id_aula = %s
+                GROUP BY a.id_aula
+                """,
+                (id_aula,),
+            )
+            aula = cursor.fetchone()
+    except HTTPException:
+        raise
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+    if aula is None:
+        raise HTTPException(status_code=404, detail="El aula no existe.")
+    return aula
+
+
+@app.post("/aulas/unirse", status_code=status.HTTP_201_CREATED)
+def unirse_aula(datos: AulaJoin) -> dict[str, object]:
+    usuario = datos.usuario.strip()
+    codigo = datos.codigo.strip().upper()
+    try:
+        with conexion_db() as (_, cursor):
+            _asegurar_tablas_aulas(cursor)
+            _validar_usuario(cursor, usuario, datos.rol)
+            cursor.execute(
+                "SELECT id_aula, nombre FROM aulas WHERE codigo = %s",
+                (codigo,),
+            )
+            aula = cursor.fetchone()
+            if aula is None:
+                raise HTTPException(status_code=404, detail="El código de aula no existe.")
+            cursor.execute(
+                """
+                INSERT INTO aula_miembros (id_aula, id_usuario, rol_aula)
+                VALUES (%s, %s, 'miembro')
+                """,
+                (aula["id_aula"], usuario),
+            )
+    except HTTPException:
+        raise
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+    return {
+        "mensaje": "Te uniste al aula correctamente.",
+        "id_aula": aula["id_aula"],
+        "nombre": aula["nombre"],
+        "codigo": codigo,
+    }
+
+
+@app.get("/aulas/{id_aula}/miembros")
+def listar_miembros(
+    id_aula: int,
+    usuario: str | None = Query(default=None, min_length=1, max_length=100),
+    rol: str | None = Query(default=None, min_length=1, max_length=20),
+) -> dict[str, list[dict[str, object]]]:
+    if (usuario is None) != (rol is None):
+        raise HTTPException(status_code=422, detail="usuario y rol deben enviarse juntos.")
+    try:
+        with conexion_db() as (_, cursor):
+            _asegurar_tablas_aulas(cursor)
+            if usuario is not None:
+                _validar_usuario(cursor, usuario, rol or "")
+            cursor.execute("SELECT id_aula FROM aulas WHERE id_aula = %s", (id_aula,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="El aula no existe.")
+            cursor.execute(
+                """
+                SELECT u.id_usuario, u.Nombre, u.Apellido, u.Institucion,
+                       u.Rol, am.rol_aula, am.unido_en
+                FROM aula_miembros AS am
+                INNER JOIN usuarios AS u ON u.id_usuario = am.id_usuario
+                WHERE am.id_aula = %s
+                ORDER BY am.rol_aula, u.Apellido, u.Nombre
+                """,
+                (id_aula,),
+            )
+            miembros = cursor.fetchall()
+    except HTTPException:
+        raise
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+    return {"miembros": miembros}
 
 
 @app.post("/crearproyecto", status_code=status.HTTP_201_CREATED)

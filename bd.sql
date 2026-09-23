@@ -17,7 +17,7 @@ SET time_zone = "+00:00";
 /*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
 /*!40101 SET NAMES utf8mb4 */;
 
---
+--  NOTASS 1 conf_modulos == un proyecto 
 -- Base de datos: `cnlab`
 --
 
@@ -26,7 +26,6 @@ SET time_zone = "+00:00";
 --
 -- Estructura de tabla para la tabla `conf_modulos`
 --
-
 CREATE TABLE `conf_modulos` (
   `Id_modulo` int(11) NOT NULL,
   `Id_proyecto` int(11) NOT NULL,
@@ -111,6 +110,32 @@ CREATE TABLE `usuarios` (
   `Institucion` varchar(150) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `aulas`
+--
+CREATE TABLE `aulas` (
+  `id_aula` int(11) NOT NULL,
+  `nombre` varchar(150) NOT NULL,
+  `descripcion` text DEFAULT NULL,
+  `codigo` varchar(20) NOT NULL,
+  `propietario` varchar(100) NOT NULL,
+  `creado_en` datetime NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Estructura de tabla para la tabla `aula_miembros`
+--
+CREATE TABLE `aula_miembros` (
+  `id_aula` int(11) NOT NULL,
+  `id_usuario` varchar(100) NOT NULL,
+  `rol_aula` enum('propietario','miembro') NOT NULL DEFAULT 'miembro',
+  `unido_en` datetime NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 --
 -- Índices para tablas volcadas
 --
@@ -160,6 +185,21 @@ ALTER TABLE `usuarios`
   ADD PRIMARY KEY (`id_usuario`);
 
 --
+-- Indices de la tabla `aulas`
+--
+ALTER TABLE `aulas`
+  ADD PRIMARY KEY (`id_aula`),
+  ADD UNIQUE KEY `uq_aulas_codigo` (`codigo`),
+  ADD KEY `fk_aulas_propietario` (`propietario`);
+
+--
+-- Indices de la tabla `aula_miembros`
+--
+ALTER TABLE `aula_miembros`
+  ADD PRIMARY KEY (`id_aula`,`id_usuario`),
+  ADD KEY `fk_aula_miembros_usuario` (`id_usuario`);
+
+--
 -- AUTO_INCREMENT de las tablas volcadas
 --
 
@@ -194,6 +234,12 @@ ALTER TABLE `tipo_sensor`
   MODIFY `id_ts` int(11) NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT de la tabla `aulas`
+--
+ALTER TABLE `aulas`
+  MODIFY `id_aula` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- Restricciones para tablas volcadas
 --
 
@@ -225,6 +271,19 @@ ALTER TABLE `sensores_proyecto`
   ADD CONSTRAINT `sensores_proyecto_ibfk_2` FOREIGN KEY (`id_proyecto`) REFERENCES `proyectos` (`Id_proyecto`) ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE `sensores_proyecto`
   ADD CONSTRAINT `fk_sensores_modulo` FOREIGN KEY (`Id_modulo`) REFERENCES `conf_modulos` (`Id_modulo`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+--
+-- Filtros para la tabla `aulas`
+--
+ALTER TABLE `aulas`
+  ADD CONSTRAINT `fk_aulas_propietario` FOREIGN KEY (`propietario`) REFERENCES `usuarios` (`id_usuario`) ON UPDATE CASCADE;
+
+--
+-- Filtros para la tabla `aula_miembros`
+--
+ALTER TABLE `aula_miembros`
+  ADD CONSTRAINT `fk_aula_miembros_aula` FOREIGN KEY (`id_aula`) REFERENCES `aulas` (`id_aula`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_aula_miembros_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE ON UPDATE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

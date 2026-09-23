@@ -1,14 +1,21 @@
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator
 
 import mysql.connector
 from mysql.connector import MySQLConnection
 from mysql.connector.cursor import MySQLCursor
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 def _configuracion() -> dict[str, object]:
-    required = ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME")
+    # MySQL permite autenticación sin contraseña en instalaciones locales.
+    # La contraseña se valida al intentar conectarse, no como variable obligatoria.
+    required = ("DB_HOST", "DB_USER", "DB_NAME")
     missing = [name for name in required if not os.getenv(name)]
     if missing:
         raise RuntimeError(
