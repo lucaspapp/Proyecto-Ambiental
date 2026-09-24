@@ -1,11 +1,9 @@
       const state = {
         user: JSON.parse(localStorage.getItem("ecolab_user") || "null"),
         users: JSON.parse(localStorage.getItem("ecolab_users") || "[]"),
-        classrooms: JSON.parse(
-          localStorage.getItem("ecolab_classrooms") || "[]",
-        ),
-        devices: JSON.parse(localStorage.getItem("ecolab_devices") || "[]"),
-        sensors: JSON.parse(localStorage.getItem("ecolab_sensors") || "[]"),
+        classrooms: [],
+        devices: [],
+        sensors: [],
         classCode: localStorage.getItem("ecolab_class") || "",
         chart: null,
         classroomMembers: {},
@@ -13,10 +11,17 @@
         classroomsLoading: false,
         classroomsError: "",
         classroomsLoaded: false,
+        dashboardTimer: null,
+        devicesLoadedFor: {},
       };
       const API_CONFIG = {
-        baseUrl: window.ECOLAB_API_URL || localStorage.getItem("ecolab_api_url") || "http://127.0.0.1:8003",
-        timeoutMs: 5000,
+        baseUrl:
+          window.ECOLAB_API_URL ||
+          localStorage.getItem("ecolab_api_url") ||
+          (window.location.protocol === "http:" || window.location.protocol === "https:"
+            ? window.location.origin
+            : "http://127.0.0.1:8003"),
+        timeoutMs: 30000,
       };
       const apiUrl = (path) =>
         `${API_CONFIG.baseUrl.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
@@ -26,7 +31,9 @@
         const headers = {
           Accept: "application/json",
           "X-Usuario-Local": state.user?.id || "",
-          ...(options.body ? { "Content-Type": "application/json" } : {}),
+          ...(options.body && !(options.body instanceof FormData)
+            ? { "Content-Type": "application/json" }
+            : {}),
           ...(options.headers || {}),
         };
         try {
@@ -58,7 +65,7 @@
         rol: state.user?.role || "estudiante",
       });
       function saveClassrooms() {
-        localStorage.setItem("ecolab_classrooms", JSON.stringify(state.classrooms));
+        return state.classrooms;
       }
       const esc = (value) =>
         String(value ?? "").replace(
@@ -73,7 +80,11 @@
             })[c],
         );
       const go = (page) => {
-        location.hash = page;
+        if (location.hash === `#${page}`) {
+          render();
+        } else {
+          location.hash = page;
+        }
       };
       const initials = (name) =>
         (name || "Usuario")
@@ -166,13 +177,10 @@
             role: String(f.get("rol")),
           };
           try {
-            const response = await fetch(apiUrl("/crearuser"), {
+            await apiRequest("/crearuser", {
               method: "POST",
               body: f,
-              headers: { Accept: "application/json" },
             });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.detail || "No se pudo crear la cuenta.");
             state.users.push(user);
             localStorage.setItem("ecolab_users", JSON.stringify(state.users));
             toast("Cuenta creada. Ya podés ingresar.");
@@ -187,9 +195,38 @@
       }
 
       function dashboard() {
-        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-slate-400">Buen día, ${esc(state.user?.nombre || "explorador")} 👋</p><h2 class="mt-1 text-3xl font-bold">Tu espacio ambiental</h2></div><button data-nav="clase" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night hover:bg-white">${icon("plus", "h-4 w-4 inline")} Crear o unirme a una clase</button></div><div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">${stat("24.8 °C", "Temperatura promedio", "En rango saludable", "cyan")}${stat("61 %", "Humedad relativa", "+4.2% esta semana", "leaf")}${stat("03", "Sensores activos", "Todo funcionando", "soil")}${stat("07", "Clases realizadas", "Este mes", "cyan")}</div><div class="mt-5 grid gap-5 xl:grid-cols-[1.5fr_1fr]"><div class="glass rounded-2xl p-5"><div class="mb-5 flex items-center justify-between"><div><h3 class="font-semibold">Datos ambientales</h3><p class="text-xs text-slate-500">Últimas 24 horas · Estación patio</p></div><span class="rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-400">En vivo ▾</span></div><div class="h-72"><canvas id="main-chart"></canvas></div></div><div class="glass rounded-2xl p-5"><div class="flex items-center justify-between"><h3 class="font-semibold">Actividad reciente</h3><button data-nav="clase" class="text-xs text-cyan">Ver todo</button></div><div class="mt-5 space-y-5">${activity("Nueva medición registrada", "Hace 2 minutos", "sensor")}${activity("Clase «Calidad del aire» iniciada", "Hace 1 hora", "book")}${activity("Módulo actualizado por Prof. García", "Ayer, 14:32", "info")}${activity("Te uniste a EcoLab", "Ayer, 09:10", "users")}</div></div></div><div class="glass mt-5 rounded-2xl p-5"><div class="flex items-center justify-between"><div><h3 class="font-semibold">Continuá aprendiendo</h3><p class="text-xs text-slate-500">Recursos para tu próxima clase</p></div><button data-nav="proyecto" class="text-xs text-cyan">Ver todos</button></div><div class="mt-5 grid gap-4 md:grid-cols-3">${resource("01", "¿Qué es un ecosistema?", "Conceptos base para comenzar", "cyan")}${resource("02", "Leer una gráfica", "Interpretá tendencias y cambios", "leaf")}${resource("03", "Tu primera medición", "Guía rápida del sensor", "soil")}</div></div>`;
+        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-slate-400">Buen día, ${esc(state.user?.nombre || "explorador")}</p><h2 class="mt-1 text-3xl font-bold">Tu espacio ambiental</h2></div><button data-nav="clase" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night">${icon("plus", "h-4 w-4 inline")} Crear o unirme a una clase</button></div><div class="glass rounded-2xl p-5"><div class="mb-5 flex items-center justify-between"><div><h3 class="font-semibold">Mediciones en tiempo real</h3><p id="dashboard-status" class="text-xs text-slate-500">Consultando...</p></div><span class="rounded-lg bg-white/5 px-3 py-2 text-xs text-leaf">Actualiza cada 5 s</span></div><div class="h-80"><canvas id="main-chart"></canvas></div><p id="dashboard-empty" class="hidden py-10 text-center text-sm text-slate-400">No hay mediciones recibidas todavía.</p></div><div class="glass mt-5 rounded-2xl p-5"><div class="flex items-center justify-between"><div><h3 class="font-semibold">Continuá aprendiendo</h3><p class="text-xs text-slate-500">Recursos para comprender tus datos</p></div><button data-nav="proyecto" class="text-xs text-cyan">Ver todos</button></div><div class="mt-5 grid gap-4 md:grid-cols-3">${resource("01", "Observar", "Formulá una pregunta sobre tu entorno.", "cyan")}${resource("02", "Medir", "Aprendé qué representa cada unidad.", "leaf")}${resource("03", "Interpretar", "Compará tendencias antes de sacar conclusiones.", "soil")}</div></div>`;
         mount(shell(content, "Dashboard"), "dashboard");
-        drawChart();
+        if (state.dashboardTimer) clearInterval(state.dashboardTimer);
+        const refresh = async () => {
+          try {
+            const data = await apiRequest(`/sensores/historial?limite=120&usuario=${encodeURIComponent(state.user?.id || "")}&rol=${encodeURIComponent(state.user?.role || "")}`);
+            const rows = data.mediciones || [];
+            const chart = document.querySelector("#main-chart");
+            const empty = document.querySelector("#dashboard-empty");
+            if (!rows.length) {
+              chart.classList.add("hidden");
+              empty.classList.remove("hidden");
+              return;
+            }
+            chart.classList.remove("hidden");
+            empty.classList.add("hidden");
+            const labels = rows.map((row) => new Date(row.fecha).toLocaleTimeString());
+            const ids = [...new Set(rows.map((row) => row.id_sp))];
+            const colors = ["#69d4e5", "#83c99a", "#bd8b62", "#f59e0b"];
+            if (state.chart) state.chart.destroy();
+            state.chart = new Chart(chart, {
+              type: "line",
+              data: { labels, datasets: ids.map((id, index) => ({ label: `Sensor ${id}`, data: rows.map((row) => row.id_sp === id ? row.valor : null), borderColor: colors[index % colors.length], tension: 0.35, spanGaps: true })) },
+              options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: "#64748b" } }, y: { ticks: { color: "#64748b" } } } },
+            });
+            document.querySelector("#dashboard-status").textContent = `Última actualización: ${new Date(rows[rows.length - 1].fecha).toLocaleTimeString()}`;
+          } catch {
+            document.querySelector("#dashboard-status").textContent = "No se pudieron consultar las mediciones.";
+          }
+        };
+        refresh();
+        state.dashboardTimer = setInterval(refresh, 5000);
       }
 
       function stat(value, title, note, color) {
@@ -293,16 +330,9 @@
         });
       }
 
-      function sensores() {
-        const rows = state.sensors.length
-          ? state.sensors
-          : [
-              {
-                id_sp: "",
-                valor: "",
-              },
-            ];
-        const content = `<div class="mb-8"><p class="text-sm text-leaf">Laboratorio de datos</p><h2 class="mt-1 text-3xl font-bold">Sensores</h2><p class="mt-2 text-sm text-slate-400">Agregá módulos y guardá mediciones en este navegador.</p></div><div class="grid gap-5 lg:grid-cols-[.8fr_1.2fr]"><div class="glass rounded-2xl p-6"><h3 class="font-semibold">Nueva medición</h3><form id="sensor-form" class="mt-5 space-y-4"><label class="block text-sm text-slate-300">ID del proyecto<input name="id_proyecto" type="number" min="1" required value="1" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label><label class="block text-sm text-slate-300">ID del módulo<input name="id_modulo" type="number" min="1" required value="1" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label><div><div class="mb-2 flex items-center justify-between"><label class="text-sm text-slate-300">Sensores conectados</label><button type="button" id="add-sensor" class="text-xs text-cyan">+ Agregar</button></div><div id="sensor-rows" class="space-y-3">${rows.map(sensorRow).join("")}</div></div><button class="w-full rounded-xl bg-cyan py-3 font-semibold text-night">Guardar mediciones</button><p id="sensor-msg" class="min-h-5 text-sm"></p></form></div><div class="glass rounded-2xl p-6"><div class="flex items-center justify-between"><div><h3 class="font-semibold">Estado de la estación</h3><p class="text-xs text-slate-500">Datos de demostración</p></div><span class="rounded-full bg-leaf/10 px-3 py-1 text-xs text-leaf">● Local</span></div><div class="mt-6 grid gap-3 sm:grid-cols-3">${["Temperatura", "Humedad", "Calidad aire"].map((x, i) => `<div class="rounded-xl border border-white/10 p-4"><p class="text-xs text-slate-500">${x}</p><b class="mt-2 block text-2xl">${["24.8 °C", "61 %", "Buena"][i]}</b><span class="mt-2 block text-xs text-leaf">Normal</span></div>`).join("")}</div><div class="mt-6 h-60"><canvas id="sensor-chart"></canvas></div></div></div>`;
+      async function enviarMediciones() {
+        const rows = [{ id_sp: "", valor: "" }];
+        const content = `<div class="mb-8"><p class="text-sm text-leaf">Laboratorio de datos</p><h2 class="mt-1 text-3xl font-bold">Sensores</h2><p class="mt-2 text-sm text-slate-400">Las mediciones se envían a la API y solo se muestran datos recibidos.</p></div><div class="grid gap-5 lg:grid-cols-[.8fr_1.2fr]"><div class="glass rounded-2xl p-6"><h3 class="font-semibold">Nueva medición</h3><form id="sensor-form" class="mt-5 space-y-4"><label class="block text-sm text-slate-300">ID del proyecto<input name="id_proyecto" type="number" min="1" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label><label class="block text-sm text-slate-300">ID del módulo<input name="id_modulo" type="number" min="1" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label><div><div class="mb-2 flex items-center justify-between"><label class="text-sm text-slate-300">Sensores conectados</label><button type="button" id="add-sensor" class="text-xs text-cyan">+ Agregar</button></div><div id="sensor-rows" class="space-y-3">${rows.map(sensorRow).join("")}</div></div><button class="w-full rounded-xl bg-cyan py-3 font-semibold text-night">Enviar mediciones</button><p id="sensor-msg" class="min-h-5 text-sm"></p></form></div><div class="glass rounded-2xl p-6"><div class="flex items-center justify-between"><div><h3 class="font-semibold">Última estación recibida</h3><p class="text-xs text-slate-500">Datos reales de la API</p></div></div><div id="latest-sensors" class="mt-6 text-sm text-slate-400">Consultando...</div></div></div>`;
         mount(shell(content, "Sensores"), "sensores");
         document.querySelector("#add-sensor").onclick = () => {
           document.querySelector("#sensor-rows").insertAdjacentHTML(
@@ -319,21 +349,41 @@
             if (e.target.dataset.remove)
               e.target.closest(".sensor-row").remove();
           });
-        document.querySelector("#sensor-form").onsubmit = (e) => {
+        document.querySelector("#sensor-form").onsubmit = async (e) => {
           e.preventDefault();
           const msg = document.querySelector("#sensor-msg");
+          const form = new FormData(e.target);
           const mediciones = [...document.querySelectorAll(".sensor-row")].map(
             (r) => ({
               id_sp: Number(r.querySelector("[name=id_sp]").value),
               valor: Number(r.querySelector("[name=valor]").value),
             }),
           );
-          state.sensors = mediciones;
-          localStorage.setItem("ecolab_sensors", JSON.stringify(mediciones));
-          msg.textContent = `Mediciones guardadas · ${mediciones.length} sensores`;
-          msg.className = "text-sm text-leaf";
+          try {
+            await apiRequest("/sensores", {
+              method: "POST",
+              body: JSON.stringify({
+                id_proyecto: Number(form.get("id_proyecto")),
+                id_modulo: Number(form.get("id_modulo")),
+                mediciones,
+              }),
+            });
+            msg.textContent = `Mediciones guardadas · ${mediciones.length} sensores`;
+            msg.className = "text-sm text-leaf";
+          } catch (error) {
+            msg.textContent = error.message;
+            msg.className = "text-sm text-red-300";
+          }
         };
-        if (window.Chart)
+        apiRequest("/sensores/actual").then((data) => {
+          const latest = data.mediciones || [];
+          document.querySelector("#latest-sensors").innerHTML = latest.length
+            ? latest.map((item) => `<div class="rounded-xl border border-white/10 p-3">Sensor ${esc(item.id_sp)}: <b>${esc(item.valor)}</b></div>`).join("")
+            : "No hay mediciones recibidas todavía.";
+        }).catch(() => {
+          document.querySelector("#latest-sensors").textContent = "No hay mediciones recibidas todavía.";
+        });
+        if (false && window.Chart)
           new Chart(document.querySelector("#sensor-chart"), {
             type: "bar",
             data: {
@@ -397,7 +447,39 @@
         return state.devices.filter((device) => device.classId === classId);
       }
 
-      function clase() {
+      async function cargarDispositivosAula(classroom) {
+        if (!classroom || state.devicesLoadedFor[classroom.id]) return;
+        try {
+          const data = await apiRequest(
+            `/aulas/${encodeURIComponent(classroom.id)}/dispositivos?usuario=${encodeURIComponent(state.user?.id || "")}&rol=${encodeURIComponent(state.user?.role || "")}`,
+          );
+          const devices = (data.dispositivos || []).map((device) => ({
+            ...device,
+            id: device.id_modulo,
+            classId: classroom.id,
+            name: device.nombre,
+            interval: Math.max(1, Number(device.data_mediciones || 30)),
+            sensors: (device.sensores || []).map((sensor) => ({
+              ...sensor,
+              id: sensor.id_sp,
+              type: sensor.tipo || `Sensor ${sensor.id_sp}`,
+              unit: sensor.unidad || "",
+              value: "",
+            })),
+          }));
+          state.devices = state.devices
+            .filter((device) => device.classId !== classroom.id)
+            .concat(devices);
+          state.devicesLoadedFor[classroom.id] = true;
+        } catch (error) {
+          toast(`No se pudieron cargar los dispositivos: ${error.message}`, true);
+        }
+      }
+
+      async function clase() {
+        if (state.classrooms.length && !Object.keys(state.devicesLoadedFor).length) {
+          await Promise.all(state.classrooms.map(cargarDispositivosAula));
+        }
         const canManage =
           state.user?.role === "docente" ||
           state.user?.role === "administrador";
@@ -415,7 +497,7 @@
             : `<p class="mt-3 text-xs text-leaf">Aulas sincronizadas con la API.</p>`;
         const selectedMembers = state.classroomMembers[state.selectedMembersClass] || [];
         const membersPanel = state.selectedMembersClass
-          ? `<div class="glass mt-5 rounded-2xl p-6"><h3 class="font-semibold">Miembros del aula</h3><div class="mt-4 grid gap-2 sm:grid-cols-2">${selectedMembers.map((member) => `<div class="rounded-xl bg-white/[.03] p-3 text-sm">${esc(member.nombre || member.name || member.id || "Usuario")}<span class="mt-1 block text-xs text-slate-500">${esc(member.rol || member.role || "Miembro")}</span></div>`).join("") || `<p class="text-sm text-slate-500">Todavía no hay miembros.</p>`}</div></div>`
+          ? `<div class="glass mt-5 rounded-2xl p-6"><h3 class="font-semibold">Miembros del aula</h3><div class="mt-4 grid gap-2 sm:grid-cols-2">${selectedMembers.map((member) => `<div class="rounded-xl bg-white/[.03] p-3 text-sm">${esc(member.usuario || member.id_usuario || member.nombre || member.name || member.id || "Usuario")}<span class="mt-1 block text-xs text-slate-500">${esc(member.rol_aula || member.rol || member.role || "Miembro")}</span></div>`).join("") || `<p class="text-sm text-slate-500">Todavía no hay miembros.</p>`}</div></div>`
           : "";
         const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-cyan">Aula colaborativa</p><h2 class="mt-1 text-3xl font-bold">Mis aulas</h2><p class="mt-2 text-sm text-slate-400">Cada aula puede tener varios dispositivos de medición.</p>${status}</div>${canManage ? `<button id="new-class" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night">+ Crear aula</button>` : ""}</div><div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">${cards || `<div class="glass rounded-2xl p-8 text-sm text-slate-400 md:col-span-2 xl:col-span-3">Todavía no hay aulas. Podés crear una o unirte con un código.</div>`}</div><div class="mt-5 flex flex-wrap gap-3"><button id="join-class" class="rounded-xl border border-cyan/30 px-4 py-2 text-sm text-cyan">+ Unirme con un código</button><button id="reload-classrooms" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-400">Actualizar</button></div>${membersPanel}`;
         mount(shell(content, "Mi clase"), "clase");
@@ -444,7 +526,10 @@
             toast(`Aula creada: ${classroom.code || classroom.name}`);
           } catch (error) {
             state.classroomsError = error.name === "AbortError" ? "tiempo de espera agotado" : error.message;
-            toast("Aula creada localmente; la API no respondió.", true);
+            toast(`No se pudo crear el aula: ${state.classroomsError}`, true);
+            state.classroomsLoading = false;
+            clase();
+            return;
           }
           state.classrooms.push(classroom);
           saveClassrooms();
@@ -476,9 +561,7 @@
             toast(`Te uniste a ${joinedClassroom.name}`);
           } catch (error) {
             state.classroomsError = error.name === "AbortError" ? "tiempo de espera agotado" : error.message;
-            state.classCode = normalizedCode;
-            localStorage.setItem("ecolab_class", normalizedCode);
-            toast("No se pudo sincronizar el aula; se guardó el código localmente.", true);
+            toast(`No se pudo unir al aula: ${state.classroomsError}`, true);
           }
           state.classroomsLoading = false;
           clase();
@@ -489,12 +572,12 @@
         });
         document.querySelectorAll("[data-select-class]").forEach(
           (button) =>
-            (button.onclick = () => {
+            (button.onclick = async () => {
               localStorage.setItem(
                 "ecolab_selected_class",
                 button.dataset.selectClass,
               );
-              go("sensores");
+              await mostrarDispositivos();
             }),
         );
         if (!state.classroomsLoading && !state.classroomsLoaded) cargarAulas();
@@ -513,6 +596,8 @@
           saveClassrooms();
         } catch (error) {
           state.classroomsError = error.name === "AbortError" ? "tiempo de espera agotado" : error.message;
+          state.classrooms = [];
+          saveClassrooms();
         } finally {
           state.classroomsLoading = false;
           state.classroomsLoaded = true;
@@ -527,33 +612,61 @@
           if (!Array.isArray(members)) throw new Error("Formato de miembros no válido.");
           state.classroomMembers[classId] = members;
           state.selectedMembersClass = classId;
-          const names = state.classroomMembers[classId].map((member) => member.nombre || member.name || member.id || "Usuario");
+          const names = state.classroomMembers[classId].map((member) => member.usuario || member.id_usuario || member.nombre || member.name || member.id || "Usuario");
           toast(names.length ? `Miembros: ${names.join(", ")}` : "El aula todavía no tiene miembros.");
           clase();
         } catch (error) {
           toast(`No se pudieron cargar los miembros: ${error.message}`, true);
         }
       }
-      const sensorConfigRow = (sensor) =>
-        `<div class="config-sensor grid gap-2 sm:grid-cols-[1fr_.7fr_.7fr_auto]"><select name="type" class="rounded-xl border border-white/10 bg-night px-3 py-3 text-sm"><option ${sensor.type === "Temperatura" ? "selected" : ""}>Temperatura</option><option ${sensor.type === "Humedad" ? "selected" : ""}>Humedad</option><option ${sensor.type === "Calidad del aire" ? "selected" : ""}>Calidad del aire</option></select><input name="unit" value="${esc(sensor.unit)}" placeholder="Unidad" class="rounded-xl border border-white/10 bg-night px-3 py-3 text-sm"><input name="value" type="number" step="any" value="${esc(sensor.value)}" placeholder="Valor inicial" class="rounded-xl border border-white/10 bg-night px-3 py-3 text-sm"><button type="button" data-remove="true" class="rounded-xl border border-red-400/20 px-3 text-red-300">×</button></div>`;
+      const sensorUnit = (type) =>
+        ({
+          Temperatura: "°C",
+          Humedad: "%",
+          "Calidad del aire": "AQI",
+          CO2: "ppm",
+          Presión: "hPa",
+        })[type] || "unidad";
+      const sensorConfigRow = (sensor = {}, catalog = []) => {
+        const options = catalog.length
+          ? catalog
+          : [
+              { id_ts: 1, nombre: "Temperatura", unidad: "°C" },
+              { id_ts: 2, nombre: "Humedad", unidad: "%" },
+              { id_ts: 3, nombre: "Calidad del aire", unidad: "AQI" },
+              { id_ts: 4, nombre: "CO2", unidad: "ppm" },
+              { id_ts: 5, nombre: "Presión", unidad: "hPa" },
+            ];
+        const selected = options.find((item) => Number(item.id_ts) === Number(sensor.id_ts)) || options[0];
+        return `<div class="config-sensor grid gap-2 sm:grid-cols-[1fr_.7fr_auto]"><select name="id_ts" class="sensor-type rounded-xl border border-white/10 bg-night px-3 py-3 text-sm">${options.map((item) => `<option value="${item.id_ts}" data-unit="${esc(item.unidad || sensorUnit(item.nombre))}" ${Number(item.id_ts) === Number(selected.id_ts) ? "selected" : ""}>${esc(item.nombre)}</option>`).join("")}</select><output class="sensor-unit rounded-xl border border-white/10 bg-white/[.03] px-3 py-3 text-sm text-slate-400">${esc(sensor.unit || selected.unidad || sensorUnit(selected.nombre))}</output><button type="button" data-remove="true" class="rounded-xl border border-red-400/20 px-3 text-red-300">×</button></div>`;
+      };
 
-      function configDevice(classId, deviceId) {
+      async function configDevice(classId, deviceId) {
+        let catalog = [];
+        try {
+          const response = await apiRequest("/sensores/catalogo");
+          catalog = (response.sensores || []).map((item) => ({
+            ...item,
+            unidad: String(item.unidad || "").replace(/^Â/, ""),
+          }));
+        } catch (error) {
+          console.warn("No se pudo cargar el catálogo de sensores:", error);
+        }
         const device = state.devices.find((item) => item.id === deviceId) || {
           name: "",
           interval: 30,
           sensors: [],
         };
-        const content = `<div class="mx-auto max-w-3xl"><button id="back-sensors" class="mb-6 text-sm text-cyan">← Volver</button><div class="glass rounded-2xl p-7"><h2 class="text-3xl font-bold">${deviceId ? "Editar" : "Agregar"} medidor</h2><form id="device-form" class="mt-7 space-y-5"><label class="block text-sm text-slate-300">Nombre<input name="name" required value="${esc(device.name)}" placeholder="Medidor ventana norte" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3"></label><label class="block text-sm text-slate-300">Intervalo en segundos<input name="interval" type="number" min="1" required value="${device.interval}" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3"></label><div class="flex items-center justify-between"><span class="text-sm text-slate-300">Sensores conectados</span><button type="button" id="add-config-sensor" class="text-xs text-cyan">+ Agregar sensor</button></div><div id="config-sensors" class="space-y-3">${device.sensors.map(sensorConfigRow).join("")}</div><button class="w-full rounded-xl bg-cyan py-3 font-semibold text-night">Guardar configuración</button><p id="device-msg" class="min-h-5 text-sm"></p></form></div></div>`;
+        const content = `<div class="mx-auto max-w-3xl"><button id="back-sensors" class="mb-6 text-sm text-cyan">← Volver</button><div class="glass rounded-2xl p-7"><h2 class="text-3xl font-bold">${deviceId ? "Editar" : "Agregar"} medidor</h2><form id="device-form" class="mt-7 space-y-5"><label class="block text-sm text-slate-300">Nombre<input name="name" required value="${esc(device.name)}" placeholder="Medidor ventana norte" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3"></label><label class="block text-sm text-slate-300">Intervalo en segundos<input name="interval" type="number" min="1" required value="${device.interval}" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3"></label><div class="flex items-center justify-between"><span class="text-sm text-slate-300">Sensores conectados</span><button type="button" id="add-config-sensor" class="text-xs text-cyan">+ Agregar sensor</button></div><div id="config-sensors" class="space-y-3">${device.sensors.map((sensor) => sensorConfigRow(sensor, catalog)).join("")}</div><button class="w-full rounded-xl bg-cyan py-3 font-semibold text-night">Guardar configuración</button><p id="device-msg" class="min-h-5 text-sm"></p></form></div></div>`;
         document.querySelector("#app").innerHTML = shell(content, "Sensores");
-        document.querySelector("#back-sensors").onclick = sensores;
+        document.querySelector("#back-sensors").onclick = mostrarDispositivos;
         document.querySelector("#add-config-sensor").onclick = () =>
           document.querySelector("#config-sensors").insertAdjacentHTML(
             "beforeend",
             sensorConfigRow({
-              type: "Temperatura",
+              id_ts: 1,
               unit: "°C",
-              value: "",
-            }),
+            }, catalog),
           );
         document
           .querySelector("#config-sensors")
@@ -561,14 +674,21 @@
             if (event.target.dataset.remove)
               event.target.closest(".config-sensor").remove();
           });
-        document.querySelector("#device-form").onsubmit = (event) => {
+        document.querySelectorAll(".sensor-type").forEach((select) => {
+          select.addEventListener("change", () => {
+            select.closest(".config-sensor").querySelector(".sensor-unit").textContent =
+              select.selectedOptions[0].dataset.unit;
+          });
+        });
+        document.querySelector("#device-form").onsubmit = async (event) => {
           event.preventDefault();
           const form = new FormData(event.target);
           const sensors = [...document.querySelectorAll(".config-sensor")].map(
             (row) => ({
-              type: row.querySelector("[name=type]").value,
-              unit: row.querySelector("[name=unit]").value.trim(),
-              value: row.querySelector("[name=value]").value,
+              id_ts: Number(row.querySelector("[name=id_ts]").value),
+              t_registro: "00:05:00",
+              t_muestra: "00:00:30",
+              descripcion: "",
             }),
           );
           if (!sensors.length) {
@@ -576,40 +696,92 @@
               "Agregá al menos un sensor.";
             return;
           }
-          const saved = {
-            id: deviceId || Date.now(),
-            classId,
-            name: String(form.get("name")).trim(),
-            interval: Number(form.get("interval")),
-            code:
-              device.code ||
-              `DEV-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
-            sensors,
-          };
-          const index = state.devices.findIndex((item) => item.id === saved.id);
-          if (index < 0) state.devices.push(saved);
-          else state.devices[index] = saved;
-          localStorage.setItem("ecolab_devices", JSON.stringify(state.devices));
-          toast("Dispositivo configurado");
-          sensores();
+          try {
+            const classroom = state.classrooms.find((item) => item.id === classId);
+            const projectId = classroom?.projectId || classId;
+            await apiRequest(`/proyectos/${projectId}/dispositivos`, {
+              method: "POST",
+              body: JSON.stringify({
+                id_modulo: deviceId || undefined,
+                nombre: String(form.get("name")).trim(),
+                data_mediciones: Number(form.get("interval")),
+                data_guardado: 0,
+                descripcion: "",
+                sensores,
+              }),
+            });
+            state.devicesLoadedFor[classId] = false;
+            toast("Dispositivo configurado");
+            mostrarDispositivos();
+          } catch (error) {
+            document.querySelector("#device-msg").textContent = error.message;
+          }
         };
       }
 
-      function sensores() {
+      async function mostrarDispositivos() {
         const classId = Number(
           localStorage.getItem("ecolab_selected_class") || 0,
         );
-        const classroom =
-          state.classrooms.find((item) => item.id === classId) ||
-          state.classrooms[0];
-        const devices = classroom ? classroomDevices(classroom.id) : [];
+        let classroom = state.classrooms.find((item) => item.id === classId);
+        if (!classroom) {
+          try {
+            const data = await apiRequest(
+              `/aulas?usuario=${encodeURIComponent(state.user?.id || "")}&rol=${encodeURIComponent(state.user?.role || "")}`,
+            );
+            state.classrooms = (data.aulas || []).map(classroomFromApi);
+            classroom =
+              state.classrooms.find((item) => String(item.id) === String(classId)) ||
+              state.classrooms[0];
+          } catch (error) {
+            mount(
+              shell(
+                `<div class="glass rounded-2xl p-8 text-sm text-red-300">No se pudieron cargar tus aulas: ${esc(error.message)}</div>`,
+                "Sensores",
+              ),
+              "sensores",
+            );
+            return;
+          }
+        }
+        if (classroom) {
+          localStorage.setItem("ecolab_selected_class", String(classroom.id));
+        }
+        let devices = [];
+        if (classroom) {
+          try {
+            const data = await apiRequest(`/aulas/${encodeURIComponent(classroom.id)}/dispositivos?usuario=${encodeURIComponent(state.user?.id || "")}&rol=${encodeURIComponent(state.user?.role || "")}`);
+            classroom.projectId = data.id_proyecto;
+            devices = data.dispositivos || [];
+            state.devices = state.devices
+              .filter((item) => item.classId !== classroom.id)
+              .concat(
+                devices.map((device) => ({
+                  ...device,
+                  id: device.id_modulo,
+                  classId: classroom.id,
+                  name: device.nombre,
+                  interval: Math.max(1, Number(device.data_mediciones || 30)),
+                  sensors: (device.sensores || []).map((sensor) => ({
+                    ...sensor,
+                    id: sensor.id_sp,
+                    type: sensor.tipo,
+                    unit: sensor.unidad || sensorUnit(sensor.tipo),
+                    value: "",
+                  })),
+                })),
+              );
+          } catch (error) {
+            toast(`No se pudieron cargar los dispositivos: ${error.message}`, true);
+          }
+        }
         const canManage =
           state.user?.role === "docente" ||
           state.user?.role === "administrador";
         const cards = devices
           .map(
             (device) =>
-              `<article class="glass rounded-2xl p-6"><div class="flex items-start justify-between"><div><span class="text-xs text-cyan">${esc(device.code)}</span><h3 class="mt-1 text-xl font-semibold">${esc(device.name)}</h3><p class="text-sm text-slate-400">${device.sensors.length} sensores · cada ${device.interval}s</p></div><span class="rounded-full bg-leaf/10 px-3 py-1 text-xs text-leaf">Listo</span></div><div class="mt-5 grid gap-3 sm:grid-cols-2">${device.sensors.map((sensor) => `<div class="rounded-xl border border-white/10 p-4"><div class="flex justify-between"><b>${esc(sensor.type)}</b><span class="text-xs text-slate-500">${esc(sensor.unit)}</span></div><p class="mt-2 text-2xl font-semibold">${esc(sensor.value || "—")}</p></div>`).join("")}</div>${canManage ? `<button data-edit-device="${device.id}" class="mt-5 rounded-xl border border-cyan/30 px-4 py-2 text-sm text-cyan">Editar sensores</button>` : ""}</article>`,
+              `<article class="glass rounded-2xl p-6"><div class="flex items-start justify-between"><div><span class="text-xs text-cyan">ID ${esc(device.id_modulo)}</span><h3 class="mt-1 text-xl font-semibold">${esc(device.nombre)}</h3><p class="text-sm text-slate-400">${device.sensores.length} sensores</p></div><span class="rounded-full bg-leaf/10 px-3 py-1 text-xs text-leaf">Listo</span></div><div class="mt-5 grid gap-3 sm:grid-cols-2">${device.sensores.map((sensor) => `<div class="rounded-xl border border-white/10 p-4"><div class="flex justify-between"><b>${esc(sensor.tipo || `Sensor ${sensor.id_sp}`)}</b><span class="text-xs text-slate-500">${esc(sensor.unidad || "")}</span></div><p class="mt-2 text-2xl font-semibold">ID ${esc(sensor.id_sp)}</p></div>`).join("")}</div>${canManage ? `<button data-edit-device="${device.id_modulo}" class="mt-5 rounded-xl border border-cyan/30 px-4 py-2 text-sm text-cyan">Editar sensores</button>` : ""}</article>`,
           )
           .join("");
         const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-leaf">Laboratorio de datos</p><h2 class="mt-1 text-3xl font-bold">Dispositivos y sensores</h2><p class="mt-2 text-sm text-slate-400">${classroom ? `Aula: ${esc(classroom.name)}` : "Creá un aula desde Mi clase."}</p></div>${classroom && canManage ? `<button id="new-device" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night">+ Agregar dispositivo</button>` : ""}</div><div class="space-y-4">${cards || `<div class="glass rounded-2xl p-8 text-sm text-slate-400">No hay dispositivos en esta aula.</div>`}</div>`;
@@ -661,9 +833,10 @@
           ({
             dashboard,
             clase,
-            sensores,
+            sensores: mostrarDispositivos,
             admin,
             perfil,
+            proyecto,
           })[page] || dashboard
         )();
       }

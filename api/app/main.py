@@ -1,14 +1,17 @@
 from datetime import datetime, timezone
 import hashlib
+import os
 import secrets
 from threading import Lock
+from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from mysql.connector import Error, IntegrityError
 from pydantic import BaseModel, ConfigDict, Field
 
-from conexion import conexion_db
+from .conexion import conexion_db
 
 
 app = FastAPI(
@@ -17,9 +20,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("API_CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins or ["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,9 +111,16 @@ class DeviceSensorConfig(BaseModel):
     descripcion: str = Field("", max_length=1000)
 
 
+class SensorTypeResponse(BaseModel):
+    id_ts: int
+    nombre: str
+    unidad: str
+
+
 class DeviceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    id_modulo: int | None = Field(default=None, gt=0)
     nombre: str = Field(..., min_length=1, max_length=150)
     data_mediciones: int = Field(..., ge=0)
     data_guardado: int = Field(..., ge=0)
@@ -137,6 +153,12 @@ class LoginData(BaseModel):
 
     usuario: str = Field(..., min_length=1, max_length=100)
     contrasenia: str = Field(..., min_length=1, max_length=255)
+
+
+class DeviceIdAssignment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id_proyecto: int = Field(..., gt=0)
 
 
 def _verificar_password(password: str, almacenada: str) -> bool:
@@ -465,7 +487,7 @@ def listar_miembros(
                 raise HTTPException(status_code=404, detail="El aula no existe.")
             cursor.execute(
                 """
-                SELECT u.id_usuario, u.Nombre, u.Apellido, u.Institucion,
+                SELECT u.id_usuario, u.id_usuario AS usuario, u.Nombre, u.Apellido, u.Institucion,
                        u.Rol, am.rol_aula, am.unido_en
                 FROM aula_miembros AS am
                 INNER JOIN usuarios AS u ON u.id_usuario = am.id_usuario
@@ -528,6 +550,45 @@ def crearconfig(
     return {"mensaje": "Configuración creada correctamente"}
 
 
+@app.post("/dispositivos/asignar-id", status_code=status.HTTP_201_CREATED)
+def asignar_id_dispositivo(datos: DeviceIdAssignment) -> dict[str, object]:
+    """Reserva un ID global de microcontrolador de forma atómica."""
+    try:
+        with conexion_db() as (_, cursor):
+            cursor.execute(
+                "SELECT Id_proyecto FROM proyectos WHERE Id_proyecto = %s",
+                (datos.id_proyecto,),
+            )
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="El proyecto no existe.")
+
+            cursor.execute(
+                """
+                INSERT INTO conf_modulos
+                    (Id_proyecto, Data_mediciones, Data_guardado, Nombre, Descripcion)
+                VALUES (%s, 0, 0, %s, %s)
+                """,
+                (
+                    datos.id_proyecto,
+                    "Microcontrolador pendiente",
+                    "ID reservado; falta completar la configuración.",
+                ),
+            )
+            id_modulo = cursor.lastrowid
+    except HTTPException:
+        raise
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+
+    return {
+        "id_modulo": id_modulo,
+        "id_proyecto": datos.id_proyecto,
+        "mensaje": "ID de microcontrolador asignado correctamente.",
+    }
+
+
 @app.post("/proyectos/{id_proyecto}/dispositivos", status_code=status.HTTP_201_CREATED)
 def crear_dispositivo(id_proyecto: int, dispositivo: DeviceConfig) -> dict[str, object]:
     try:
@@ -539,21 +600,52 @@ def crear_dispositivo(id_proyecto: int, dispositivo: DeviceConfig) -> dict[str, 
             if cursor.fetchone() is None:
                 raise HTTPException(status_code=404, detail="El aula no existe.")
 
-            cursor.execute(
-                """
-                INSERT INTO conf_modulos
-                    (Id_proyecto, Data_mediciones, Data_guardado, Nombre, Descripcion)
-                VALUES (%s, %s, %s, %s, %s)
-                """,
-                (
-                    id_proyecto,
-                    dispositivo.data_mediciones,
-                    dispositivo.data_guardado,
-                    dispositivo.nombre.strip(),
-                    dispositivo.descripcion.strip(),
-                ),
-            )
-            modulo_id = cursor.lastrowid
+            if dispositivo.id_modulo is None:
+                cursor.execute(
+                    """
+                    INSERT INTO conf_modulos
+                        (Id_proyecto, Data_mediciones, Data_guardado, Nombre, Descripcion)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        id_proyecto,
+                        dispositivo.data_mediciones,
+                        dispositivo.data_guardado,
+                        dispositivo.nombre.strip(),
+                        dispositivo.descripcion.strip(),
+                    ),
+                )
+                modulo_id = cursor.lastrowid
+            else:
+                cursor.execute(
+                    """
+                    SELECT Id_modulo
+                    FROM conf_modulos
+                    WHERE Id_modulo = %s AND Id_proyecto = %s
+                    """,
+                    (dispositivo.id_modulo, id_proyecto),
+                )
+                if cursor.fetchone() is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="El ID del microcontrolador no existe para este proyecto.",
+                    )
+                modulo_id = dispositivo.id_modulo
+                cursor.execute(
+                    """
+                    UPDATE conf_modulos
+                    SET Data_mediciones = %s, Data_guardado = %s,
+                        Nombre = %s, Descripcion = %s
+                    WHERE Id_modulo = %s
+                    """,
+                    (
+                        dispositivo.data_mediciones,
+                        dispositivo.data_guardado,
+                        dispositivo.nombre.strip(),
+                        dispositivo.descripcion.strip(),
+                        modulo_id,
+                    ),
+                )
             cursor.executemany(
                 """
                 INSERT INTO sensores_proyecto
@@ -587,9 +679,29 @@ def crear_dispositivo(id_proyecto: int, dispositivo: DeviceConfig) -> dict[str, 
 
 
 @app.get("/proyectos/{id_proyecto}/dispositivos")
-def listar_dispositivos(id_proyecto: int) -> dict[str, list[dict[str, object]]]:
+def listar_dispositivos(
+    id_proyecto: int,
+    usuario: str | None = Query(default=None, min_length=1, max_length=100),
+    rol: str | None = Query(default=None, min_length=1, max_length=20),
+) -> dict[str, list[dict[str, object]]]:
+    if (usuario is None) != (rol is None):
+        raise HTTPException(status_code=422, detail="usuario y rol deben enviarse juntos.")
     try:
         with conexion_db() as (_, cursor):
+            if usuario is not None:
+                _validar_usuario(cursor, usuario, rol or "")
+                cursor.execute(
+                    """
+                    SELECT 1 FROM aula_miembros
+                    WHERE id_aula = %s AND id_usuario = %s
+                    """,
+                    (id_proyecto, usuario.strip()),
+                )
+                if cursor.fetchone() is None:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="No tienes acceso a los dispositivos de esta aula.",
+                    )
             cursor.execute(
                 """
                 SELECT m.Id_modulo, m.Nombre, m.Data_mediciones, m.Data_guardado,
@@ -606,6 +718,8 @@ def listar_dispositivos(id_proyecto: int) -> dict[str, list[dict[str, object]]]:
                 (id_proyecto,),
             )
             rows = cursor.fetchall()
+    except HTTPException:
+        raise
     except (Error, RuntimeError) as error:
         if isinstance(error, Error):
             raise _error_db(error) from error
@@ -637,6 +751,91 @@ def listar_dispositivos(id_proyecto: int) -> dict[str, list[dict[str, object]]]:
                 }
             )
     return {"dispositivos": list(dispositivos.values())}
+
+
+@app.get("/aulas/{id_aula}/dispositivos")
+def listar_dispositivos_aula(
+    id_aula: int,
+    usuario: str = Query(..., min_length=1, max_length=100),
+    rol: str = Query(..., min_length=1, max_length=20),
+) -> dict[str, object]:
+    """Resuelve el proyecto de un aula y devuelve sus dispositivos."""
+    try:
+        with conexion_db() as (_, cursor):
+            _validar_usuario(cursor, usuario, rol)
+            cursor.execute(
+                """
+                SELECT a.nombre, a.propietario
+                FROM aulas AS a
+                INNER JOIN aula_miembros AS am ON am.id_aula = a.id_aula
+                WHERE a.id_aula = %s AND am.id_usuario = %s
+                """,
+                (id_aula, usuario.strip()),
+            )
+            aula = cursor.fetchone()
+            if aula is None:
+                raise HTTPException(status_code=403, detail="No tienes acceso a esta aula.")
+            cursor.execute(
+                """
+                SELECT Id_proyecto
+                FROM proyectos
+                WHERE Usuario = %s AND Titulo = %s
+                ORDER BY Id_proyecto DESC
+                LIMIT 1
+                """,
+                (aula["propietario"], aula["nombre"]),
+            )
+            proyecto = cursor.fetchone()
+            if proyecto is None:
+                return {"id_proyecto": None, "dispositivos": []}
+            cursor.execute(
+                """
+                SELECT m.Id_modulo, m.Nombre, m.Data_mediciones, m.Data_guardado,
+                       m.Descripcion, s.id_sp, s.id_ts, s.t_registro,
+                       s.t_muestra, s.descripcion AS sensor_descripcion,
+                       t.nombre AS tipo_sensor
+                FROM conf_modulos AS m
+                LEFT JOIN sensores_proyecto AS s
+                    ON s.id_proyecto = m.Id_proyecto AND s.Id_modulo = m.Id_modulo
+                LEFT JOIN tipo_sensor AS t ON t.id_ts = s.id_ts
+                WHERE m.Id_proyecto = %s
+                ORDER BY m.Id_modulo, s.id_sp
+                """,
+                (proyecto["Id_proyecto"],),
+            )
+            rows = cursor.fetchall()
+    except HTTPException:
+        raise
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+
+    dispositivos: dict[int, dict[str, object]] = {}
+    for row in rows:
+        dispositivo = dispositivos.setdefault(
+            int(row["Id_modulo"]),
+            {
+                "id_modulo": row["Id_modulo"],
+                "nombre": row["Nombre"],
+                "data_mediciones": row["Data_mediciones"],
+                "data_guardado": row["Data_guardado"],
+                "descripcion": row["Descripcion"],
+                "sensores": [],
+            },
+        )
+        if row["id_sp"] is not None:
+            dispositivo["sensores"].append(
+                {
+                    "id_sp": row["id_sp"],
+                    "id_ts": row["id_ts"],
+                    "tipo": row["tipo_sensor"],
+                    "t_registro": row["t_registro"],
+                    "t_muestra": row["t_muestra"],
+                    "descripcion": row["sensor_descripcion"],
+                }
+            )
+    return {"id_proyecto": proyecto["Id_proyecto"], "dispositivos": list(dispositivos.values())}
 
 
 @app.get("/veruser")
@@ -718,6 +917,98 @@ def sensores_actual() -> dict[str, object]:
         return _datos_sensores[-1].copy()
 
 
+@app.get("/sensores/historial")
+def sensores_historial(
+    id_proyecto: int | None = Query(default=None, gt=0),
+    id_modulo: int | None = Query(default=None, gt=0),
+    limite: int = Query(default=60, ge=1, le=500),
+    usuario: str | None = Query(default=None, min_length=1, max_length=100),
+    rol: str | None = Query(default=None, min_length=1, max_length=20),
+) -> dict[str, list[dict[str, object]]]:
+    if (usuario is None) != (rol is None):
+        raise HTTPException(status_code=422, detail="usuario y rol deben enviarse juntos.")
+    filtros = []
+    parametros: list[object] = []
+    if id_proyecto is not None:
+        filtros.append("m.Id_proyecto = %s")
+        parametros.append(id_proyecto)
+    if id_modulo is not None:
+        filtros.append("m.Id_modulo = %s")
+        parametros.append(id_modulo)
+    joins = ""
+    if usuario is not None:
+        joins = """
+            INNER JOIN proyectos AS p ON p.Id_proyecto = m.Id_proyecto
+            INNER JOIN aulas AS a
+                ON a.propietario = p.Usuario AND a.nombre = p.Titulo
+            INNER JOIN aula_miembros AS am
+                ON am.id_aula = a.id_aula AND am.id_usuario = %s
+        """
+        parametros.insert(0, usuario.strip())
+    where = f"WHERE {' AND '.join(filtros)}" if filtros else ""
+    try:
+        with conexion_db() as (_, cursor):
+            cursor.execute(
+                f"""
+                SELECT m.Tiempo AS fecha, m.id_sp, m.Valor AS valor
+                FROM mediciones AS m
+                {joins}
+                {where}
+                ORDER BY m.Tiempo DESC, m.Id_medicion DESC
+                LIMIT %s
+                """,
+                [*parametros, limite],
+            )
+            filas = cursor.fetchall()
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+    return {"mediciones": list(reversed(filas))}
+
+
+@app.get("/sensores/catalogo")
+def catalogo_sensores() -> dict[str, list[SensorTypeResponse]]:
+    try:
+        with conexion_db() as (_, cursor):
+            cursor.execute(
+                "SELECT id_ts, nombre, Descripcion FROM tipo_sensor ORDER BY id_ts"
+            )
+            rows = cursor.fetchall()
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+
+    unidades = {
+        "temperatura": "°C",
+        "humedad": "%",
+        "calidad del aire": "AQI",
+        "co2": "ppm",
+        "presion": "hPa",
+        "presión": "hPa",
+    }
+    return {
+        "sensores": [
+            SensorTypeResponse(
+                id_ts=row["id_ts"],
+                nombre=row["nombre"],
+                unidad=unidades.get(str(row["nombre"]).strip().lower(), "unidad"),
+            )
+            for row in rows
+        ]
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+_frontend_directory = Path(__file__).resolve().parents[2] / "frontend"
+if _frontend_directory.is_dir():
+    app.mount(
+        "/web",
+        StaticFiles(directory=_frontend_directory, html=True),
+        name="web",
+    )

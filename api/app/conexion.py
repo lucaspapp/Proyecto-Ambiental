@@ -28,6 +28,7 @@ def _configuracion() -> dict[str, object]:
         "user": os.environ["DB_USER"],
         "password": os.environ["DB_PASSWORD"],
         "database": os.environ["DB_NAME"],
+        "charset": "utf8mb4",
         "autocommit": False,
     }
 

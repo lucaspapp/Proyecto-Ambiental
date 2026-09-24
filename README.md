@@ -80,20 +80,37 @@ Comprueba que funciona:
 
 ## 3. Abrir el frontend
 
-Con la API iniciada, abre [`frontend/index.html`](frontend/index.html) en el
-navegador. Si la API está en otra computadora, cambia `API_PUBLIC_URL` en
-`api/.env` por una dirección accesible desde la red, por ejemplo:
+La API sirve el frontend en el mismo origen. Con la API iniciada, abre:
 
-```dotenv
-API_PUBLIC_URL=http://192.168.1.50:8003
+```text
+http://IP_DEL_SERVIDOR:8003/web/
 ```
 
-También puedes indicar la dirección desde la consola del navegador:
+Por ejemplo, desde otro equipo de la red:
+
+```text
+http://192.168.1.50:8003/web/
+```
+
+Así el navegador descarga la web y envía las peticiones a la misma dirección,
+evitando el `Network Error` causado por `127.0.0.1` y evitando CORS en el uso
+normal. Si se sirve el frontend desde Apache u otro origen, cambia
+`API_CORS_ORIGINS` en `api/.env` por los orígenes permitidos, por ejemplo:
+
+```dotenv
+API_CORS_ORIGINS=http://192.168.1.50,http://192.168.1.50:80
+```
+
+También puedes indicar manualmente la URL de la API desde la consola del
+navegador:
 
 ```js
 localStorage.setItem("ecolab_api_url", "http://192.168.1.50:8003");
 location.reload();
 ```
+
+No abras `frontend/index.html` directamente con `file://` para el uso en red;
+usa `/web/` o configura explícitamente `ecolab_api_url`.
 
 ## 4. Crear usuarios y aulas
 
@@ -158,10 +175,60 @@ su correo exista en la tabla `usuarios`.
 | `POST` | `/aulas` | Crear un aula |
 | `POST` | `/aulas/unirse` | Unirse con un código |
 | `GET` | `/aulas/{id_aula}/miembros` | Ver integrantes |
+| `POST` | `/dispositivos/asignar-id` | Reservar un ID único para un microcontrolador |
+| `POST` | `/proyectos/{id_proyecto}/dispositivos` | Configurar un microcontrolador y sus sensores |
 | `POST` | `/sensores` | Guardar mediciones de la ESP32 |
 | `GET` | `/sensores/actual` | Consultar la última tanda |
 
 Para ver todos los campos y probar las rutas, usa Swagger en `/docs`.
+
+### Asignar un ID a un microcontrolador
+
+Antes de configurar un dispositivo, el microcontrolador puede reservar un ID
+único para el proyecto:
+
+```http
+POST /dispositivos/asignar-id
+Content-Type: application/json
+
+{"id_proyecto": 4}
+```
+
+La respuesta contiene `id_modulo`, que se debe conservar para identificar el
+dispositivo y sus sensores:
+
+```json
+{
+  "id_modulo": 7,
+  "id_proyecto": 4,
+  "mensaje": "ID de microcontrolador asignado correctamente."
+}
+```
+
+La asignación usa el `AUTO_INCREMENT` de `conf_modulos`, por lo que las
+solicitudes simultáneas no pueden recibir el mismo ID. Para completar la
+configuración, se puede enviar ese `id_modulo` en
+`POST /proyectos/{id_proyecto}/dispositivos`; la API actualizará la reserva
+existente en lugar de crear otro ID.
+
+### Simular los sensores de Aula 5
+
+El script [`tools/simular_sensores.py`](tools/simular_sensores.py) descubre los
+sensores configurados para un microcontrolador y envía valores aleatorios de
+temperatura, humedad y calidad del aire:
+
+```powershell
+python tools\simular_sensores.py --project-id 5 --module-id 3 --interval 5
+```
+
+Para enviar solo tres tandas:
+
+```powershell
+python tools\simular_sensores.py --project-id 5 --module-id 3 --iterations 3
+```
+
+El simulador usa únicamente la API; no escribe directamente en la base de
+datos. Detenelo con `Ctrl+C`.
 
 ## Uso en una red escolar
 
@@ -169,5 +236,6 @@ Configura `API_HOST=0.0.0.0`, permite el puerto `8003` en el firewall y usa la
 IP de la computadora que ejecuta la API en `API_PUBLIC_URL`. Los equipos de
 los alumnos deben estar en la misma red y poder acceder a esa IP.
 
-Para producción, desactiva `API_RELOAD`, restringe los orígenes CORS en
-`api/app/main.py` y usa credenciales de base de datos con permisos mínimos.
+Para producción, desactiva `API_RELOAD`, define `API_CORS_ORIGINS` con una
+lista separada por comas de orígenes concretos y usa credenciales de base de
+datos con permisos mínimos.
