@@ -120,6 +120,7 @@ CREATE TABLE `aulas` (
   `nombre` varchar(150) NOT NULL,
   `descripcion` text DEFAULT NULL,
   `codigo` varchar(20) NOT NULL,
+  `publica` tinyint(1) NOT NULL DEFAULT 0,
   `propietario` varchar(100) NOT NULL,
   `creado_en` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

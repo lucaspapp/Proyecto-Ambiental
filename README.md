@@ -14,8 +14,11 @@ api/
   app/main.py          Endpoints FastAPI
   app/conexion.py      Conexión a la base de datos
 frontend/
-  index.html           Estructura y estilos de la aplicación
-  script.js            Lógica del frontend
+  index.html           Entrada del frontend
+  landing.html         Presentación y aulas públicas
+  landing.js           Búsqueda pública de aulas
+  script.js            Aplicación para usuarios con sesión
+  styles.css           Estilos compartidos
 bd.sql                 Tablas iniciales de la base de datos
 requirements.text      Dependencias de Python
 ```
@@ -118,7 +121,8 @@ usa `/web/` o configura explícitamente `ecolab_api_url`.
 2. Completa nombre, apellido, correo, rol y una contraseña de al menos 8
    caracteres.
 3. Inicia sesión.
-4. Un docente o administrador puede crear un aula desde **Mi clase**.
+4. Un docente o administrador puede crear un aula desde **Mi clase** y decidir
+  si quiere publicarla. Las aulas son privadas por defecto.
 5. Comparte el código del aula para que los alumnos se unan.
 6. Desde **Sensores**, configura el dispositivo y los sensores del aula.
 
@@ -171,7 +175,8 @@ su correo exista en la tabla `usuarios`.
 | --- | --- | --- |
 | `POST` | `/crearuser` | Crear un usuario |
 | `POST` | `/auth/login` | Iniciar sesión |
-| `GET` | `/aulas` | Listar aulas |
+| `GET` | `/aulas` | Listar aulas propias o públicas |
+| `GET` | `/aulas/publicas` | Buscar aulas públicas sin iniciar sesión (`limite` por defecto: 3; máximo: 50) |
 | `POST` | `/aulas` | Crear un aula |
 | `POST` | `/aulas/unirse` | Unirse con un código |
 | `GET` | `/aulas/{id_aula}/miembros` | Ver integrantes |
@@ -181,6 +186,9 @@ su correo exista en la tabla `usuarios`.
 | `GET` | `/sensores/actual` | Consultar la última tanda |
 
 Para ver todos los campos y probar las rutas, usa Swagger en `/docs`.
+La portada muestra tres aulas públicas inicialmente y permite buscar o cargar
+las siguientes. Las aulas que ya existían antes del campo `publica` quedan
+privadas automáticamente.
 
 ### Asignar un ID a un microcontrolador
 
