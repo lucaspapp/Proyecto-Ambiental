@@ -48,6 +48,7 @@ def _asegurar_tablas_aulas(cursor: object) -> None:
             nombre VARCHAR(150) NOT NULL,
             descripcion TEXT NULL,
             codigo VARCHAR(20) NOT NULL,
+            publica TINYINT(1) NOT NULL DEFAULT 0,
             propietario VARCHAR(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
             creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id_aula),
@@ -59,6 +60,11 @@ def _asegurar_tablas_aulas(cursor: object) -> None:
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """
     )
+    cursor.execute("SHOW COLUMNS FROM aulas LIKE 'publica'")
+    if cursor.fetchone() is None:
+        cursor.execute(
+            "ALTER TABLE aulas ADD COLUMN publica TINYINT(1) NOT NULL DEFAULT 0"
+        )
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS aula_miembros (
@@ -136,6 +142,7 @@ class AulaCreate(BaseModel):
 
     nombre: str = Field(..., min_length=1, max_length=150)
     descripcion: str = Field("", max_length=5000)
+    publica: bool = False
     usuario: str = Field(..., min_length=1, max_length=100)
     rol: str = Field(..., min_length=1, max_length=20)
 
@@ -312,10 +319,10 @@ def crear_aula(aula: AulaCreate) -> dict[str, object]:
             codigo = _codigo_aula()
             cursor.execute(
                 """
-                INSERT INTO aulas (nombre, descripcion, codigo, propietario)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO aulas (nombre, descripcion, codigo, publica, propietario)
+                VALUES (%s, %s, %s, %s, %s)
                 """,
-                (nombre, descripcion, codigo, usuario),
+                (nombre, descripcion, codigo, aula.publica, usuario),
             )
             id_aula = cursor.lastrowid
             cursor.execute(
@@ -336,6 +343,7 @@ def crear_aula(aula: AulaCreate) -> dict[str, object]:
         "id_aula": id_aula,
         "nombre": nombre,
         "descripcion": descripcion,
+        "publica": aula.publica,
         "codigo": codigo,
         "propietario": usuario,
     }
@@ -357,11 +365,11 @@ def listar_aulas(
             if usuario is None:
                 cursor.execute(
                     """
-                    SELECT a.id_aula, a.nombre, a.descripcion, a.codigo,
-                           a.propietario, a.creado_en,
+                    SELECT a.id_aula, a.nombre, a.descripcion, a.creado_en,
                            COUNT(am.id_usuario) AS cantidad_miembros
                     FROM aulas AS a
                     LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula
+                    WHERE a.publica = 1
                     GROUP BY a.id_aula
                     ORDER BY a.id_aula DESC
                     """
@@ -393,6 +401,44 @@ def listar_aulas(
     return {"aulas": aulas}
 
 
+@app.get("/aulas/publicas")
+def listar_aulas_publicas(
+    buscar: str = Query(default="", max_length=150),
+    limite: int = Query(default=3, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    termino = buscar.strip()
+    patron = f"%{termino}%"
+    try:
+        with conexion_db() as (_, cursor):
+            _asegurar_tablas_aulas(cursor)
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM aulas WHERE publica = 1 AND (%s = '' OR nombre LIKE %s OR COALESCE(descripcion, '') LIKE %s)",
+                (termino, patron, patron),
+            )
+            total = cursor.fetchone()["total"]
+            cursor.execute(
+                """
+                SELECT a.id_aula, a.nombre, a.descripcion, a.creado_en,
+                       COUNT(am.id_usuario) AS cantidad_miembros
+                FROM aulas AS a
+                LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula
+                WHERE a.publica = 1
+                  AND (%s = '' OR a.nombre LIKE %s OR COALESCE(a.descripcion, '') LIKE %s)
+                GROUP BY a.id_aula
+                ORDER BY a.id_aula DESC
+                LIMIT %s OFFSET %s
+                """,
+                (termino, patron, patron, limite, offset),
+            )
+            aulas = cursor.fetchall()
+    except (Error, RuntimeError) as error:
+        if isinstance(error, Error):
+            raise _error_db(error) from error
+        raise HTTPException(status_code=503, detail="Base de datos no configurada.") from error
+    return {"aulas": aulas, "total": total, "limite": limite, "offset": offset}
+
+
 @app.get("/aulas/{id_aula}")
 def ver_aula(
     id_aula: int,
@@ -406,21 +452,38 @@ def ver_aula(
             _asegurar_tablas_aulas(cursor)
             if usuario is not None:
                 _validar_usuario(cursor, usuario, rol or "")
-            cursor.execute("SELECT id_aula FROM aulas WHERE id_aula = %s", (id_aula,))
-            if cursor.fetchone() is None:
-                raise HTTPException(status_code=404, detail="El aula no existe.")
             cursor.execute(
-                """
-                SELECT a.id_aula, a.nombre, a.descripcion, a.codigo,
-                       a.propietario, a.creado_en,
-                       COUNT(am.id_usuario) AS cantidad_miembros
-                FROM aulas AS a
-                LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula
-                WHERE a.id_aula = %s
-                GROUP BY a.id_aula
-                """,
+                "SELECT publica FROM aulas WHERE id_aula = %s",
                 (id_aula,),
             )
+            aula_privacidad = cursor.fetchone()
+            if aula_privacidad is None or (usuario is None and not aula_privacidad["publica"]):
+                raise HTTPException(status_code=404, detail="El aula no existe.")
+            if usuario is None:
+                cursor.execute(
+                    """
+                    SELECT a.id_aula, a.nombre, a.descripcion, a.creado_en,
+                           COUNT(am.id_usuario) AS cantidad_miembros
+                    FROM aulas AS a
+                    LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula
+                    WHERE a.id_aula = %s
+                    GROUP BY a.id_aula
+                    """,
+                    (id_aula,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT a.id_aula, a.nombre, a.descripcion, a.codigo,
+                           a.propietario, a.creado_en,
+                           COUNT(am.id_usuario) AS cantidad_miembros
+                    FROM aulas AS a
+                    LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula
+                    WHERE a.id_aula = %s
+                    GROUP BY a.id_aula
+                    """,
+                    (id_aula,),
+                )
             aula = cursor.fetchone()
     except HTTPException:
         raise
