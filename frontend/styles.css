@@ -1,0 +1,59 @@
+body {
+  background: #101a22;
+}
+
+.glass {
+  background: rgba(23, 38, 48, 0.82);
+  border: 1px solid rgba(132, 198, 205, 0.16);
+  backdrop-filter: blur(12px);
+}
+
+.grid-bg {
+  background-image: linear-gradient(rgba(105, 212, 229, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(105, 212, 229, 0.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.page {
+  animation: page-in 0.35s ease-out both;
+}
+
+.float {
+  animation: float 5s ease-in-out infinite;
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.8s infinite;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes float {
+  50% {
+    transform: translateY(-7px);
+  }
+}
+
+@keyframes pulse-dot {
+  50% {
+    box-shadow: 0 0 0 8px rgba(131, 201, 154, 0.1);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #31515b;
+  border-radius: 99px;
+}

@@ -128,6 +128,7 @@
       }
 
       function login() {
+        delete document.querySelector("#app").dataset.publicHome;
         document.querySelector("#app").innerHTML =
           `<div class="grid min-h-screen lg:grid-cols-2"><div class="grid-bg relative hidden overflow-hidden bg-gradient-to-br from-[#102f37] via-night to-night p-12 lg:flex lg:flex-col lg:justify-between"><div class="flex items-center gap-3"><div class="grid h-12 w-12 place-items-center rounded-2xl bg-cyan text-xl font-bold text-night">E</div><b class="text-xl">Eco<span class="text-cyan">Lab</span></b></div><div class="relative"><div class="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-cyan/10 blur-3xl"></div><p class="mb-4 text-sm uppercase tracking-[.25em] text-cyan">Aprender haciendo</p><h1 class="max-w-xl text-5xl font-bold leading-tight">Medí, entendé y transformá tu entorno.</h1><p class="mt-6 max-w-lg text-slate-400">Una plataforma para que profesores y alumnos exploren datos ambientales en tiempo real.</p></div><p class="text-xs text-slate-600">Proyecto Ambiental · Plataforma educativa</p></div><div class="flex items-center justify-center p-6"><div class="w-full max-w-md"><div class="mb-10 lg:hidden"><b class="text-xl">Eco<span class="text-cyan">Lab</span></b></div><p class="mb-2 text-sm text-cyan">Bienvenido de nuevo</p><h2 class="text-3xl font-bold">Entrá a tu aula</h2><p class="mt-2 text-sm text-slate-400">Usá tus datos para continuar con tu proyecto.</p>          <form id="login-form" class="mt-8 space-y-5"><label class="block text-sm text-slate-300">Correo electrónico<input name="id" type="email" required placeholder="nombre@colegio.edu" class="mt-2 w-full rounded-xl border border-white/10 bg-panel px-4 py-3 outline-none focus:border-cyan"></label><label class="block text-sm text-slate-300">Contraseña<input name="password" type="password" required minlength="8" placeholder="••••••••" class="mt-2 w-full rounded-xl border border-white/10 bg-panel px-4 py-3 outline-none focus:border-cyan"></label><button class="w-full rounded-xl bg-cyan px-4 py-3 font-semibold text-night transition hover:bg-white">Ingresar al aula</button><p id="login-msg" class="min-h-5 text-center text-sm text-red-300"></p></form><div class="mt-8 border-t border-white/10 pt-6 text-center text-sm text-slate-400">¿Primera vez? <button id="register-link" class="text-cyan hover:underline">Crear una cuenta</button></div><p class="mt-8 text-center text-xs text-slate-600">La cuenta debe existir en la API y tener una contraseña válida.</p></div></div></div>`;
           document.querySelector("#login-form").onsubmit = async (e) => {
@@ -158,6 +159,7 @@
       }
 
       function register() {
+        delete document.querySelector("#app").dataset.publicHome;
         document.querySelector("#app").innerHTML =
           `<div class="grid min-h-screen place-items-center p-6"><div class="w-full max-w-lg"><button onclick="login()" class="mb-8 text-sm text-cyan">← Volver al ingreso</button><div class="glass rounded-3xl p-7 md:p-10"><p class="text-sm text-cyan">Nueva cuenta</p><h1 class="mt-2 text-3xl font-bold">Creá tu perfil</h1><p class="mt-2 text-sm text-slate-400">Registrate para participar de las clases ambientales.</p><form id="register-form" class="mt-7 grid gap-4 sm:grid-cols-2"><label class="text-sm text-slate-300">Nombre<input name="nombre" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label><label class="text-sm text-slate-300">Apellido<input name="apellido" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label><label class="text-sm text-slate-300 sm:col-span-2">Correo electrónico<input name="id" type="email" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label><label class="text-sm text-slate-300">Rol<select name="rol" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"><option value="estudiante">Alumno</option><option value="docente">Profesor</option></select></label><label class="text-sm text-slate-300">Contraseña<input name="contrasenia" type="password" minlength="8" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label><button class="rounded-xl bg-cyan px-4 py-3 font-semibold text-night sm:col-span-2">Crear cuenta</button><p id="register-msg" class="sm:col-span-2 text-sm"></p></form></div></div></div>`;
         document.querySelector("#register-form").onsubmit = async (e) => {
@@ -508,6 +510,7 @@
             id: Date.now(),
             name: name.trim(),
             code: `ECO-${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
+            publica: confirm("¿Publicar esta aula? Las aulas públicas pueden verse sin iniciar sesión."),
           };
           state.classroomsLoading = true;
           state.classroomsError = "";
@@ -518,6 +521,7 @@
               body: JSON.stringify({
                 nombre: classroom.name,
                 descripcion: "",
+                publica: classroom.publica,
                 usuario: state.user.id,
                 rol: state.user.role,
               }),
@@ -808,7 +812,7 @@
         document.querySelector("#logout")?.addEventListener("click", () => {
           localStorage.removeItem("ecolab_user");
           state.user = null;
-          login();
+          window.renderPublicHome?.();
         });
         document.querySelector("#menu")?.addEventListener("click", () => {
           document
@@ -825,7 +829,7 @@
 
       function render() {
         if (!state.user) {
-          login();
+          window.renderPublicHome?.();
           return;
         }
         const page = location.hash.slice(1) || "dashboard";
@@ -840,5 +844,6 @@
           })[page] || dashboard
         )();
       }
+      window.EcoLabAuth = { login, register };
       window.addEventListener("hashchange", render);
       render();

@@ -1,0 +1,56 @@
+<main class="min-h-screen overflow-hidden bg-night text-slate-100">
+  <section class="grid-bg relative border-b border-white/10">
+    <header class="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 md:px-10">
+      <a class="flex items-center gap-3" href="/web/" aria-label="EcoLab inicio">
+        <span class="grid h-11 w-11 place-items-center rounded-2xl bg-cyan text-lg font-bold text-night">E</span>
+        <span class="text-lg font-bold">Eco<span class="text-cyan">Lab</span></span>
+      </a>
+      <button id="landing-login" class="rounded-lg border border-white/15 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan hover:text-cyan">Ingresar</button>
+    </header>
+
+    <div class="mx-auto grid max-w-7xl gap-10 px-5 pb-16 pt-8 md:px-10 md:pb-24 lg:grid-cols-[1.1fr_.9fr] lg:items-center lg:pt-12">
+      <div class="page max-w-3xl">
+        <p class="mb-5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.18em] text-leaf"><span class="pulse-dot h-2 w-2 rounded-full bg-leaf"></span> Ciencia ambiental en comunidad</p>
+        <h1 class="max-w-2xl text-4xl font-bold leading-tight md:text-6xl">El entorno también puede ser tu laboratorio.</h1>
+        <p class="mt-6 max-w-xl text-base leading-7 text-slate-300 md:text-lg">EcoLab conecta aulas, sensores y estudiantes para medir lo que pasa a nuestro alrededor, comprender los datos y convertir preguntas ambientales en proyectos reales.</p>
+        <div class="mt-8 flex flex-wrap gap-3">
+          <button id="landing-explore" class="rounded-lg bg-cyan px-5 py-3 text-sm font-semibold text-night transition hover:bg-white">Explorar aulas públicas</button>
+          <button id="landing-register" class="rounded-lg border border-white/15 px-5 py-3 text-sm font-semibold text-slate-200 transition hover:border-leaf hover:text-leaf">Crear cuenta</button>
+        </div>
+        <p class="mt-5 text-xs text-slate-500">Proyectos escolares · ESP32 · Mediciones ambientales en tiempo real</p>
+      </div>
+
+      <div class="relative hidden min-h-[310px] items-center justify-center lg:flex" aria-hidden="true">
+        <div class="absolute h-64 w-64 rounded-full border border-cyan/20"></div>
+        <div class="absolute h-48 w-48 rounded-full border border-leaf/25"></div>
+        <div class="relative grid h-36 w-36 place-items-center rounded-full border border-cyan/30 bg-panel text-cyan shadow-[0_0_70px_rgba(105,212,229,.12)]">
+          <svg class="h-16 w-16" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M32 53V31m0 12c-13 0-20-8-20-21 12 0 20 6 20 17Zm0-8c0-12 7-20 20-20 0 12-7 20-20 20Z"/><circle cx="32" cy="32" r="29"/></svg>
+        </div>
+        <span class="absolute left-[16%] top-[22%] h-3 w-3 rounded-full bg-soil"></span>
+        <span class="absolute bottom-[20%] right-[17%] h-2.5 w-2.5 rounded-full bg-leaf"></span>
+      </div>
+    </div>
+  </section>
+
+  <section id="public-classes" class="mx-auto max-w-7xl px-5 py-12 md:px-10 md:py-16">
+    <div class="flex flex-wrap items-end justify-between gap-5 border-b border-white/10 pb-5">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[.18em] text-cyan">Aprendizaje abierto</p>
+        <h2 class="mt-2 text-2xl font-bold md:text-3xl">Aulas públicas</h2>
+        <p class="mt-2 max-w-xl text-sm text-slate-400">Conocé los proyectos ambientales que sus docentes eligieron compartir.</p>
+      </div>
+      <form id="public-search" class="flex w-full max-w-md gap-2">
+        <label class="sr-only" for="public-query">Buscar aulas públicas</label>
+        <input id="public-query" type="search" maxlength="150" placeholder="Buscar por nombre o tema" class="min-w-0 flex-1 rounded-lg border border-white/15 bg-panel px-4 py-3 text-sm outline-none placeholder:text-slate-500 focus:border-cyan" />
+        <button class="rounded-lg bg-white/10 px-4 text-sm font-medium text-white transition hover:bg-white/15" type="submit">Buscar</button>
+      </form>
+    </div>
+    <p id="public-status" class="py-5 text-sm text-slate-400" role="status" aria-live="polite">Cargando aulas...</p>
+    <div id="public-class-list" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"></div>
+    <div class="mt-6 flex justify-center">
+      <button id="public-more" class="hidden rounded-lg border border-cyan/30 px-5 py-3 text-sm font-medium text-cyan transition hover:bg-cyan/10">Ver más aulas</button>
+    </div>
+  </section>
+
+  <footer class="border-t border-white/10 px-5 py-6 text-center text-xs text-slate-500 md:px-10">EcoLab · Una plataforma para investigar el ambiente desde la escuela</footer>
+</main>
