@@ -1,0 +1,44 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "EcoLab PHP API",
+    "version": "1.0.0",
+    "description": "Especificación de compatibilidad para la API de EcoLab migrada a PHP."
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:8003" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Health check exitoso",
+            "content": {
+              "application/json": {
+                "example": { "status": "ok" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "usuario": "alumno@colegio.edu",
+                "contrasenia": "secreta"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Login correcto" }
+        }
+      }
+    }
+  }
+}
