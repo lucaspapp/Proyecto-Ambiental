@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
 $envFile = __DIR__ . '/.env';
 if (is_file($envFile)) {
     $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);

@@ -14,11 +14,8 @@ api/
   app/main.py          Endpoints FastAPI
   app/conexion.py      Conexión a la base de datos
 frontend/
-  index.html           Entrada del frontend
-  landing.html         Presentación y aulas públicas
-  landing.js           Búsqueda pública de aulas
-  script.js            Aplicación para usuarios con sesión
-  styles.css           Estilos compartidos
+  index.html           Estructura y estilos de la aplicación
+  script.js            Lógica del frontend
 bd.sql                 Tablas iniciales de la base de datos
 requirements.text      Dependencias de Python
 ```
@@ -83,37 +80,20 @@ Comprueba que funciona:
 
 ## 3. Abrir el frontend
 
-La API sirve el frontend en el mismo origen. Con la API iniciada, abre:
-
-```text
-http://IP_DEL_SERVIDOR:8003/web/
-```
-
-Por ejemplo, desde otro equipo de la red:
-
-```text
-http://192.168.1.50:8003/web/
-```
-
-Así el navegador descarga la web y envía las peticiones a la misma dirección,
-evitando el `Network Error` causado por `127.0.0.1` y evitando CORS en el uso
-normal. Si se sirve el frontend desde Apache u otro origen, cambia
-`API_CORS_ORIGINS` en `api/.env` por los orígenes permitidos, por ejemplo:
+Con la API iniciada, abre [`frontend/index.html`](frontend/index.html) en el
+navegador. Si la API está en otra computadora, cambia `API_PUBLIC_URL` en
+`api/.env` por una dirección accesible desde la red, por ejemplo:
 
 ```dotenv
-API_CORS_ORIGINS=http://192.168.1.50,http://192.168.1.50:80
+API_PUBLIC_URL=http://192.168.1.50:8003
 ```
 
-También puedes indicar manualmente la URL de la API desde la consola del
-navegador:
+También puedes indicar la dirección desde la consola del navegador:
 
 ```js
 localStorage.setItem("ecolab_api_url", "http://192.168.1.50:8003");
 location.reload();
 ```
-
-No abras `frontend/index.html` directamente con `file://` para el uso en red;
-usa `/web/` o configura explícitamente `ecolab_api_url`.
 
 ## 4. Crear usuarios y aulas
 
@@ -121,13 +101,22 @@ usa `/web/` o configura explícitamente `ecolab_api_url`.
 2. Completa nombre, apellido, correo, rol y una contraseña de al menos 8
    caracteres.
 3. Inicia sesión.
-4. Un docente o administrador puede crear un aula desde **Mi clase** y decidir
-  si quiere publicarla. Las aulas son privadas por defecto.
+4. Un docente o administrador puede crear un aula desde **Mi clase**.
 5. Comparte el código del aula para que los alumnos se unan.
 6. Desde **Sensores**, configura el dispositivo y los sensores del aula.
 
 El registro usa `POST /crearuser` con `multipart/form-data`. La contraseña se
 almacena como hash y nunca se devuelve en las respuestas.
+
+En el hosting actual, la API PHP está publicada bajo `/api/public`; por eso el
+frontend usa `https://cn.weblab.tec4.ar/api/public` como base de la API. Comprueba
+`/api/public/health` para confirmar que esa ruta responde `{"status":"ok"}`.
+No uses `/api/health` mientras el hosting no publique un alias para esa ruta.
+
+Si el registro falla, revisa la respuesta de `POST /api/public/crearuser` en la
+pestaña **Red/Network** del navegador: un `404` indica una URL de API incorrecta,
+un `422` indica campos inválidos, un `409` indica que el correo ya está
+registrado y un `503` apunta a la conexión o configuración de MySQL.
 
 ## 5. Conectar una ESP32
 
@@ -146,6 +135,36 @@ La ESP32 envía una tanda de mediciones a `POST /sensores`:
 
 La petición debe usar `Content-Type: application/json`. Cada `id_sp` debe
 existir en `sensores_proyecto` y pertenecer al proyecto indicado.
+
+En producción, los envíos sin sesión a `POST /sensores` deben incluir el
+encabezado `Authorization: Bearer <DEVICE_API_TOKEN>` y el ID del proyecto debe
+estar incluido en `DEVICE_PROJECT_IDS`. Configura ambos valores solo en el
+entorno del servidor; guarda el token en el firmware del dispositivo y nunca en
+el frontend ni en el repositorio.
+
+## Seguridad de producción
+
+- El login crea una sesión PHP protegida con cookie `HttpOnly`, `SameSite=Strict`
+  y `Secure` en producción. Las rutas de aulas/proyectos requieren sesión.
+- El registro público solo crea cuentas de estudiante. Las cuentas docentes y
+  administradoras deben provisionarse desde un flujo administrativo confiable.
+- Las cuentas existentes que todavía tengan contraseñas heredadas sin hash deben
+  restablecerse antes de poder iniciar sesión; luego se puede actualizar la clave
+  desde el endpoint autenticado `POST /auth/change-password`.
+- Se aplican límites de intentos para login, registro y códigos de aula, además
+  de un límite de tamaño para las solicitudes.
+- Ejecuta una vez el SQL de
+  [`api/migrations/20261028_harden_password_default.sql`](api/migrations/20261028_harden_password_default.sql)
+  sobre la base existente para quitar el default antiguo de `usuarios.Password`.
+- Rota las credenciales de base de datos que hayan sido compartidas, mantenlas
+  fuera del repositorio y verifica que `api/.env` no esté publicado ni servido
+  desde el document root. Configura `CORS_ALLOWED_ORIGINS` con el origen exacto.
+- Si usas Nginx, aplica dentro del bloque HTTPS las reglas de
+  [`api/nginx-security.conf`](api/nginx-security.conf); Nginx no procesa los
+  archivos `.htaccess` de Apache.
+- Para que usuario y API compartan cookie, publica ambas bajo el mismo dominio
+  HTTPS. El frontend nunca debe confiar en el usuario guardado en `localStorage`
+  como autenticación; el servidor valida la sesión en cada ruta.
 
 ## Solución rápida del error `503` al crear un usuario
 
@@ -175,68 +194,14 @@ su correo exista en la tabla `usuarios`.
 | --- | --- | --- |
 | `POST` | `/crearuser` | Crear un usuario |
 | `POST` | `/auth/login` | Iniciar sesión |
-| `GET` | `/aulas` | Listar aulas propias o públicas |
-| `GET` | `/aulas/publicas` | Buscar aulas públicas sin iniciar sesión (`limite` por defecto: 3; máximo: 50) |
+| `GET` | `/aulas` | Listar aulas |
 | `POST` | `/aulas` | Crear un aula |
 | `POST` | `/aulas/unirse` | Unirse con un código |
 | `GET` | `/aulas/{id_aula}/miembros` | Ver integrantes |
-| `POST` | `/dispositivos/asignar-id` | Reservar un ID único para un microcontrolador |
-| `POST` | `/proyectos/{id_proyecto}/dispositivos` | Configurar un microcontrolador y sus sensores |
 | `POST` | `/sensores` | Guardar mediciones de la ESP32 |
 | `GET` | `/sensores/actual` | Consultar la última tanda |
 
 Para ver todos los campos y probar las rutas, usa Swagger en `/docs`.
-La portada muestra tres aulas públicas inicialmente y permite buscar o cargar
-las siguientes. Las aulas que ya existían antes del campo `publica` quedan
-privadas automáticamente.
-
-### Asignar un ID a un microcontrolador
-
-Antes de configurar un dispositivo, el microcontrolador puede reservar un ID
-único para el proyecto:
-
-```http
-POST /dispositivos/asignar-id
-Content-Type: application/json
-
-{"id_proyecto": 4}
-```
-
-La respuesta contiene `id_modulo`, que se debe conservar para identificar el
-dispositivo y sus sensores:
-
-```json
-{
-  "id_modulo": 7,
-  "id_proyecto": 4,
-  "mensaje": "ID de microcontrolador asignado correctamente."
-}
-```
-
-La asignación usa el `AUTO_INCREMENT` de `conf_modulos`, por lo que las
-solicitudes simultáneas no pueden recibir el mismo ID. Para completar la
-configuración, se puede enviar ese `id_modulo` en
-`POST /proyectos/{id_proyecto}/dispositivos`; la API actualizará la reserva
-existente en lugar de crear otro ID.
-
-### Simular los sensores de Aula 5
-
-El script [`tools/simular_sensores.py`](tools/simular_sensores.py) descubre los
-sensores configurados para un microcontrolador y envía valores aleatorios de
-temperatura, humedad y calidad del aire:
-
-```powershell
-python tools\simular_sensores.py --project-id 5 --module-id 3 --interval 5
-```
-
-Para enviar solo tres tandas:
-
-```powershell
-python tools\simular_sensores.py --project-id 5 --module-id 3 --iterations 3
-```
-
-El simulador usa únicamente la API; no escribe directamente en la base de
-datos. Detenelo con `Ctrl+C`.
 
 ## Uso en una red escolar
 
@@ -244,6 +209,5 @@ Configura `API_HOST=0.0.0.0`, permite el puerto `8003` en el firewall y usa la
 IP de la computadora que ejecuta la API en `API_PUBLIC_URL`. Los equipos de
 los alumnos deben estar en la misma red y poder acceder a esa IP.
 
-Para producción, desactiva `API_RELOAD`, define `API_CORS_ORIGINS` con una
-lista separada por comas de orígenes concretos y usa credenciales de base de
-datos con permisos mínimos.
+Para producción, desactiva `API_RELOAD`, restringe los orígenes CORS en
+`api/app/main.py` y usa credenciales de base de datos con permisos mínimos.

@@ -6,28 +6,32 @@ class Response
 {
     public static function json(mixed $payload, int $status = 200, array $headers = []): never
     {
+        header_remove('X-Powered-By');
         http_response_code($status);
 
         foreach ($headers as $name => $value) {
             header($name . ': ' . $value);
         }
 
-        $origin = getenv('CORS_ALLOWED_ORIGINS') ?: '*';
-        $origins = array_filter(array_map('trim', explode(',', $origin)), static fn ($value): bool => $value !== '');
-
-        if ($origins !== []) {
-            $requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
-            $allowed = in_array($requestOrigin, $origins, true) ? $requestOrigin : $origins[0];
-            header('Access-Control-Allow-Origin: ' . $allowed);
-        } else {
-            header('Access-Control-Allow-Origin: *');
+        $allowedOrigins = array_filter(array_map('trim', explode(',', (string) Config::get('CORS_ALLOWED_ORIGINS', ''))));
+        $requestOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+        if ($requestOrigin !== '' && in_array($requestOrigin, $allowedOrigins, true)) {
+            header('Access-Control-Allow-Origin: ' . $requestOrigin);
+            header('Access-Control-Allow-Credentials: true');
         }
+        header('Vary: Origin');
 
         header('Content-Type: application/json; charset=utf-8');
-        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-        header('Access-Control-Allow-Headers: Content-Type, Accept, X-Usuario-Local');
+        header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type, Accept, Authorization, X-Usuario-Local');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Frame-Options: DENY');
+        header('Referrer-Policy: no-referrer');
+        header('Cache-Control: no-store, private');
 
-        echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($status !== 204) {
+            echo json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
         exit;
     }
 

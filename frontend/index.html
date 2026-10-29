@@ -4,29 +4,32 @@
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1" name="viewport" />
     <meta
-      content="Plataforma educativa para proyectos ambientales y sensores en tiempo real."
+      content="EcoLab conecta aulas, proyectos y sensores para explorar y comprender el ambiente desde la escuela."
       name="description"
     />
-    <title>EcoLab | Aula ambiental</title>
+    <meta name="theme-color" content="#101a22" />
+    <title>EcoLab | Aprender midiendo el ambiente</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ["Poppins", "Calibri", "ui-sans-serif", "system-ui"],
-            },
-            colors: {
-              night: "#101a22",
-              panel: "#172630",
-              cyan: "#69d4e5",
-              leaf: "#83c99a",
-              soil: "#bd8b62",
+      if (window.tailwind) {
+        window.tailwind.config = {
+          theme: {
+            extend: {
+              fontFamily: {
+                sans: ["Poppins", "Calibri", "ui-sans-serif", "system-ui"],
+              },
+              colors: {
+                night: "#101a22",
+                panel: "#172630",
+                cyan: "#69d4e5",
+                leaf: "#83c99a",
+                soil: "#bd8b62",
+              },
             },
           },
-        },
-      };
+        };
+      }
     </script>
     <link href="https://fonts.googleapis.com" rel="preconnect" />
     <link
@@ -34,18 +37,18 @@
       rel="stylesheet"
     />
     <style>
-       body {
-        background: #101a22; }
-        .glass { background: rgba(23,38,48,.82); border: 1px solid rgba(132,198,205,.16); backdrop-filter: blur(12px); }
-        .grid-bg { background-image: linear-gradient(rgba(105,212,229,.04) 1px, transparent 1px), linear-gradient(90deg,rgba(105,212,229,.04) 1px,transparent 1px); background-size: 32px 32px; }
-        .page { animation: page-in .35s ease-out both; }
-        .float { animation: float 5s ease-in-out infinite; }
-        .pulse-dot { animation: pulse-dot 1.8s infinite; }
-        @keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform:none; } }
-        @keyframes float { 50% { transform: translateY(-7px); } }
-        @keyframes pulse-dot { 50% { box-shadow: 0 0 0 8px rgba(131,201,154,.1); } }
-        ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: # 31515 b;border - radius: 99 px;
-      }
+      html { scroll-behavior: smooth; }
+      body { background: #101a22; }
+      .glass { background: rgba(23,38,48,.82); border: 1px solid rgba(132,198,205,.16); backdrop-filter: blur(12px); }
+      .grid-bg { background-image: linear-gradient(rgba(105,212,229,.04) 1px, transparent 1px), linear-gradient(90deg,rgba(105,212,229,.04) 1px,transparent 1px); background-size: 32px 32px; }
+      .page { animation: page-in .35s ease-out both; }
+      .float { animation: float 5s ease-in-out infinite; }
+      .pulse-dot { animation: pulse-dot 1.8s infinite; }
+      @keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform:none; } }
+      @keyframes float { 50% { transform: translateY(-7px); } }
+      @keyframes pulse-dot { 50% { box-shadow: 0 0 0 8px rgba(131,201,154,.1); } }
+      ::-webkit-scrollbar { width: 8px; }
+      ::-webkit-scrollbar-thumb { background: #31515b; border-radius: 99px; }
     </style>
   </head>
   <body class="min-h-screen text-slate-100 font-sans">

@@ -6,8 +6,10 @@ require_once __DIR__ . '/Config.php';
 require_once __DIR__ . '/ApiException.php';
 require_once __DIR__ . '/Database.php';
 require_once __DIR__ . '/Http/Response.php';
+require_once __DIR__ . '/Auth.php';
 
 Config::load();
+ini_set('display_errors', '0');
 
 final class Router
 {
@@ -44,6 +46,9 @@ final class Router
     public static function dispatch(): void
     {
         $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        if ((int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 1048576) {
+            Response::error('La solicitud supera el tamaño máximo permitido.', 413);
+        }
         $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
         $path = $requestPath;
 
@@ -63,6 +68,11 @@ final class Router
         }
 
         if ($method === 'OPTIONS') {
+            $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+            $allowedOrigins = array_filter(array_map('trim', explode(',', (string) Config::get('CORS_ALLOWED_ORIGINS', ''))));
+            if ($origin !== '' && !in_array($origin, $allowedOrigins, true)) {
+                Response::error('Origen no permitido.', 403);
+            }
             Response::json([], 204);
         }
 
@@ -71,8 +81,13 @@ final class Router
                 continue;
             }
 
-            if (self::routeMatchesPattern($route['route'], $path)) {
+            $parameters = self::captureRouteParameters($route['route'], $path);
+            if ($parameters !== null) {
                 try {
+                    foreach ($parameters as $name => $value) {
+                        $_GET[$name] = $value;
+                    }
+                    Auth::authorizeRoute($method, $path);
                     ($route['handler'])();
                     return;
                 } catch (ApiException $exception) {
@@ -80,6 +95,9 @@ final class Router
                 } catch (PDOException $exception) {
                     $apiException = Database::handleException($exception);
                     Response::error($apiException->getMessage(), $apiException->status);
+                } catch (Throwable $exception) {
+                    error_log('EcoLab API unexpected error: ' . $exception->getMessage());
+                    Response::error('Ocurrió un error interno. Intenta nuevamente más tarde.', 500);
                 }
             }
         }
@@ -89,17 +107,37 @@ final class Router
 
     private static function routeMatchesPattern(string $registered, string $request): bool
     {
+        return self::captureRouteParameters($registered, $request) !== null;
+    }
+
+    private static function captureRouteParameters(string $registered, string $request): ?array
+    {
         if ($registered === $request) {
-            return true;
+            return [];
         }
-
         $pattern = preg_quote($registered, '/');
-        $pattern = preg_replace('/\\\{[a-zA-Z0-9_]+\\\}/', '([^/]+)', $pattern);
+        $names = [];
+        $pattern = preg_replace_callback(
+            '/\\\\\{([a-zA-Z0-9_]+)\\\\\}/',
+            static function (array $matches) use (&$names): string {
+                $names[] = $matches[1];
+                return '([^/]+)';
+            },
+            $pattern
+        );
         if ($pattern === null) {
-            return false;
+            return null;
         }
 
-        return preg_match('#^' . $pattern . '$#', $request) === 1;
+        if (preg_match('#^' . $pattern . '$#', $request, $matches) !== 1) {
+            return null;
+        }
+
+        $parameters = [];
+        foreach ($names as $index => $name) {
+            $parameters[$name] = rawurldecode($matches[$index + 1]);
+        }
+        return $parameters;
     }
 }
 

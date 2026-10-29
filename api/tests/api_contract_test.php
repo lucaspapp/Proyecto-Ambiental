@@ -13,6 +13,9 @@ require $bootstrap;
 $requiredRouters = [
     'GET:/health',
     'POST:/auth/login',
+    'GET:/auth/me',
+    'POST:/auth/logout',
+    'POST:/auth/change-password',
     'POST:/crearuser',
     'GET:/aulas',
     'POST:/aulas',

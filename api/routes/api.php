@@ -88,7 +88,25 @@ function validateUserAndRole(PDO $pdo, string $usuario, string $rol): void
 
 function makeClassCode(): string
 {
-    return strtoupper(bin2hex(random_bytes(4)));
+    return strtoupper(bin2hex(random_bytes(10)));
+}
+
+function assertClassMembership(PDO $pdo, int $classId, string $userId): void
+{
+    $stmt = $pdo->prepare('SELECT 1 FROM aula_miembros WHERE id_aula = ? AND id_usuario = ?');
+    $stmt->execute([$classId, $userId]);
+    if (!$stmt->fetchColumn()) {
+        throw new ApiException('No tienes acceso a esta aula.', 403);
+    }
+}
+
+function assertProjectOwner(PDO $pdo, int $projectId, string $userId): void
+{
+    $stmt = $pdo->prepare('SELECT 1 FROM proyectos WHERE Id_proyecto = ? AND Usuario = ?');
+    $stmt->execute([$projectId, $userId]);
+    if (!$stmt->fetchColumn()) {
+        throw new ApiException('No tienes acceso a este proyecto.', 403);
+    }
 }
 
 Router::add('GET', '/', static function (): void {
@@ -121,6 +139,12 @@ Router::add('POST', '/auth/login', static function (): void {
         Response::error('Usuario o contraseña incorrectos.', 401);
     }
 
+    Auth::login((string) $user['id_usuario'], (string) $user['Rol'], [
+        'nombre' => $user['Nombre'],
+        'apellido' => $user['Apellido'],
+        'institucion' => $user['Institucion'],
+    ]);
+
     Response::json([
         'usuario' => [
             'id' => $user['id_usuario'],
@@ -132,16 +156,26 @@ Router::add('POST', '/auth/login', static function (): void {
     ]);
 });
 
+Router::add('GET', '/auth/me', static function (): void {
+    $sessionUser = Auth::requireUser();
+    Response::json(['usuario' => $sessionUser]);
+});
+
+Router::add('POST', '/auth/logout', static function (): void {
+    Auth::logout();
+    Response::json(['mensaje' => 'Sesión cerrada.']);
+});
+
 Router::add('POST', '/crearuser', static function (): void {
     $form = $_POST;
-    $id = normalizeString((string) ($form['id'] ?? ''), 100);
+    $id = strtolower(normalizeString((string) ($form['id'] ?? ''), 100));
     $nombre = normalizeString((string) ($form['nombre'] ?? ''), 100);
     $apellido = normalizeString((string) ($form['apellido'] ?? ''), 100);
-    $rol = normalizeString((string) ($form['rol'] ?? 'estudiante'), 20);
+    $rol = 'estudiante';
     $password = (string) ($form['contrasenia'] ?? '');
     $institucion = normalizeString((string) ($form['institucion'] ?? ''), 150);
 
-    if ($id === '' || $nombre === '' || $apellido === '' || strlen($password) < 8) {
+    if ($id === '' || filter_var($id, FILTER_VALIDATE_EMAIL) === false || $nombre === '' || $apellido === '' || strlen($password) < 12 || strlen($password) > 128) {
         Response::error('Validación fallida.', 422);
     }
     validateUserRole($rol);
@@ -157,12 +191,48 @@ Router::add('POST', '/crearuser', static function (): void {
     Response::json(['mensaje' => 'Usuario creado correctamente'], 201);
 });
 
+Router::add('POST', '/auth/change-password', static function (): void {
+    $sessionUser = Auth::requireUser();
+    $input = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($input)) {
+        Response::error('El cuerpo JSON no es válido.', 400);
+    }
+
+    $currentPassword = (string) ($input['contrasenia_actual'] ?? '');
+    $newPassword = (string) ($input['contrasenia_nueva'] ?? '');
+    if (strlen($newPassword) < 12 || strlen($newPassword) > 128) {
+        Response::error('La nueva contraseña debe tener entre 12 y 128 caracteres.', 422);
+    }
+
+    try {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('SELECT Password FROM usuarios WHERE id_usuario = ?');
+        $stmt->execute([$sessionUser['id']]);
+        $storedHash = $stmt->fetchColumn();
+        if (!is_string($storedHash) || !passwordVerify($currentPassword, $storedHash)) {
+            Response::error('La contraseña actual es incorrecta.', 403);
+        }
+
+        $stmt = $pdo->prepare('UPDATE usuarios SET Password = ? WHERE id_usuario = ?');
+        $stmt->execute([passwordHash($newPassword), $sessionUser['id']]);
+        Auth::login((string) $sessionUser['id'], (string) $sessionUser['role'], $sessionUser);
+    } catch (PDOException $exception) {
+        throw Database::handleException($exception);
+    }
+
+    Response::json(['mensaje' => 'Contraseña actualizada correctamente.']);
+});
+
 Router::add('POST', '/aulas', static function (): void {
     $input = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($input)) {
+        Response::error('El cuerpo JSON no es válido.', 400);
+    }
     $nombre = normalizeString((string) ($input['nombre'] ?? ''), 150);
     $descripcion = normalizeString((string) ($input['descripcion'] ?? ''), 5000);
-    $usuario = normalizeString((string) ($input['usuario'] ?? ''), 100);
-    $rol = normalizeString((string) ($input['rol'] ?? ''), 20);
+    $sessionUser = Auth::requireRole('docente', 'administrador');
+    $usuario = (string) $sessionUser['id'];
+    $rol = (string) $sessionUser['role'];
 
     if ($nombre === '' || $usuario === '') {
         Response::error('Validación fallida.', 422);
@@ -176,13 +246,21 @@ Router::add('POST', '/aulas', static function (): void {
         ensureAulaTables($pdo);
         validateUserAndRole($pdo, $usuario, $rol);
         $codigo = makeClassCode();
+        $pdo->beginTransaction();
         $stmt = $pdo->prepare('INSERT INTO aulas (nombre, descripcion, codigo, propietario) VALUES (?, ?, ?, ?)');
         $stmt->execute([$nombre, $descripcion, $codigo, $usuario]);
         $idAula = (int) $pdo->lastInsertId();
         $pdo->prepare('INSERT INTO aula_miembros (id_aula, id_usuario, rol_aula) VALUES (?, ?, "propietario")')->execute([$idAula, $usuario]);
+        $pdo->commit();
     } catch (ApiException $exception) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         throw $exception;
     } catch (PDOException $exception) {
+        if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         throw Database::handleException($exception);
     }
 
@@ -196,23 +274,16 @@ Router::add('POST', '/aulas', static function (): void {
 });
 
 Router::add('GET', '/aulas', static function (): void {
-    $usuario = normalizeString($_GET['usuario'] ?? '', 100);
-    $rol = normalizeString($_GET['rol'] ?? '', 20);
-
-    if (($usuario === '') !== ($rol === '')) {
-        Response::error('usuario y rol deben enviarse juntos.', 422);
-    }
+    $sessionUser = Auth::requireUser();
+    $usuario = (string) $sessionUser['id'];
+    $rol = (string) $sessionUser['role'];
 
     try {
         $pdo = Database::connection();
         ensureAulaTables($pdo);
-        if ($usuario === '') {
-            $stmt = $pdo->query("SELECT a.id_aula, a.nombre, a.descripcion, a.codigo, a.propietario, a.creado_en, COUNT(am.id_usuario) AS cantidad_miembros FROM aulas AS a LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula GROUP BY a.id_aula ORDER BY a.id_aula DESC");
-        } else {
-            validateUserAndRole($pdo, $usuario, $rol);
-            $stmt = $pdo->prepare("SELECT a.id_aula, a.nombre, a.descripcion, a.codigo, a.propietario, a.creado_en, COUNT(total.id_usuario) AS cantidad_miembros FROM aulas AS a INNER JOIN aula_miembros AS propios ON propios.id_aula = a.id_aula AND propios.id_usuario = ? LEFT JOIN aula_miembros AS total ON total.id_aula = a.id_aula GROUP BY a.id_aula ORDER BY a.id_aula DESC");
-            $stmt->execute([$usuario]);
-        }
+        validateUserAndRole($pdo, $usuario, $rol);
+        $stmt = $pdo->prepare("SELECT a.id_aula, a.nombre, a.descripcion, a.codigo, a.propietario, a.creado_en, COUNT(total.id_usuario) AS cantidad_miembros FROM aulas AS a INNER JOIN aula_miembros AS propios ON propios.id_aula = a.id_aula AND propios.id_usuario = ? LEFT JOIN aula_miembros AS total ON total.id_aula = a.id_aula GROUP BY a.id_aula ORDER BY a.id_aula DESC");
+        $stmt->execute([$usuario]);
     } catch (ApiException $exception) {
         throw $exception;
     } catch (PDOException $exception) {
@@ -225,25 +296,18 @@ Router::add('GET', '/aulas', static function (): void {
 
 Router::add('GET', '/aulas/{id_aula}', static function (): void {
     $idAula = (int) ($_GET['id_aula'] ?? 0);
-    $usuario = normalizeString($_GET['usuario'] ?? '', 100);
-    $rol = normalizeString($_GET['rol'] ?? '', 20);
-
-    if (($usuario === '') !== ($rol === '')) {
-        Response::error('usuario y rol deben enviarse juntos.', 422);
-    }
+    $sessionUser = Auth::requireUser();
 
     try {
         $pdo = Database::connection();
         ensureAulaTables($pdo);
-        if ($usuario !== '') {
-            validateUserAndRole($pdo, $usuario, $rol);
-        }
 
         $stmt = $pdo->prepare('SELECT id_aula FROM aulas WHERE id_aula = ?');
         $stmt->execute([$idAula]);
         if (!$stmt->fetch()) {
             Response::error('El aula no existe.', 404);
         }
+        assertClassMembership($pdo, $idAula, (string) $sessionUser['id']);
 
         $stmt = $pdo->prepare("SELECT a.id_aula, a.nombre, a.descripcion, a.codigo, a.propietario, a.creado_en, COUNT(am.id_usuario) AS cantidad_miembros FROM aulas AS a LEFT JOIN aula_miembros AS am ON am.id_aula = a.id_aula WHERE a.id_aula = ? GROUP BY a.id_aula");
         $stmt->execute([$idAula]);
@@ -263,9 +327,13 @@ Router::add('GET', '/aulas/{id_aula}', static function (): void {
 
 Router::add('POST', '/aulas/unirse', static function (): void {
     $input = json_decode(file_get_contents('php://input') ?: '{}', true);
+    if (!is_array($input)) {
+        Response::error('El cuerpo JSON no es válido.', 400);
+    }
     $codigo = strtoupper(normalizeString((string) ($input['codigo'] ?? ''), 20));
-    $usuario = normalizeString((string) ($input['usuario'] ?? ''), 100);
-    $rol = normalizeString((string) ($input['rol'] ?? ''), 20);
+    $sessionUser = Auth::requireUser();
+    $usuario = (string) $sessionUser['id'];
+    $rol = (string) $sessionUser['role'];
 
     try {
         $pdo = Database::connection();
@@ -295,25 +363,18 @@ Router::add('POST', '/aulas/unirse', static function (): void {
 
 Router::add('GET', '/aulas/{id_aula}/miembros', static function (): void {
     $idAula = (int) ($_GET['id_aula'] ?? 0);
-    $usuario = normalizeString($_GET['usuario'] ?? '', 100);
-    $rol = normalizeString($_GET['rol'] ?? '', 20);
-
-    if (($usuario === '') !== ($rol === '')) {
-        Response::error('usuario y rol deben enviarse juntos.', 422);
-    }
+    $sessionUser = Auth::requireUser();
 
     try {
         $pdo = Database::connection();
         ensureAulaTables($pdo);
-        if ($usuario !== '') {
-            validateUserAndRole($pdo, $usuario, $rol);
-        }
 
         $stmt = $pdo->prepare('SELECT id_aula FROM aulas WHERE id_aula = ?');
         $stmt->execute([$idAula]);
         if (!$stmt->fetch()) {
             Response::error('El aula no existe.', 404);
         }
+        assertClassMembership($pdo, $idAula, (string) $sessionUser['id']);
 
         $stmt = $pdo->prepare("SELECT u.id_usuario, u.Nombre, u.Apellido, u.Institucion, u.Rol, am.rol_aula, am.unido_en FROM aula_miembros AS am INNER JOIN usuarios AS u ON u.id_usuario = am.id_usuario WHERE am.id_aula = ? ORDER BY am.rol_aula, u.Apellido, u.Nombre");
         $stmt->execute([$idAula]);
@@ -329,7 +390,8 @@ Router::add('GET', '/aulas/{id_aula}/miembros', static function (): void {
 
 Router::add('POST', '/crearproyecto', static function (): void {
     $project = $_POST;
-    $usuario = normalizeString((string) ($project['Usuario'] ?? ''), 100);
+    $sessionUser = Auth::requireUser();
+    $usuario = (string) $sessionUser['id'];
     $titulo = normalizeString((string) ($project['Titulo'] ?? ''), 200);
     $descripcion = normalizeString((string) ($project['Descripcion'] ?? ''), 5000);
 
@@ -362,6 +424,7 @@ Router::add('POST', '/crearconfig', static function (): void {
 
     try {
         $pdo = Database::connection();
+        assertProjectOwner($pdo, $idProyecto, (string) Auth::requireUser()['id']);
         $stmt = $pdo->prepare('INSERT INTO conf_modulos (Id_proyecto, Data_mediciones, Data_guardado, Nombre, Descripcion) VALUES (?, ?, ?, ?, ?)');
         $stmt->execute([$idProyecto, $dataMediciones, $dataGuardado, $nombre, $descripcion]);
     } catch (PDOException $exception) {
@@ -372,9 +435,7 @@ Router::add('POST', '/crearconfig', static function (): void {
 });
 
 Router::add('POST', '/proyectos/{id_proyecto}/dispositivos', static function (): void {
-    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
-    preg_match('#/proyectos/([0-9]+)/dispositivos$#', $path, $matches);
-    $idProyecto = (int) ($matches[1] ?? 0);
+    $idProyecto = (int) ($_GET['id_proyecto'] ?? 0);
     $input = json_decode(file_get_contents('php://input') ?: '{}', true);
 
     if ($idProyecto <= 0 || !is_array($input)) {
@@ -383,11 +444,7 @@ Router::add('POST', '/proyectos/{id_proyecto}/dispositivos', static function ():
 
     try {
         $pdo = Database::connection();
-        $stmt = $pdo->prepare('SELECT Id_proyecto FROM proyectos WHERE Id_proyecto = ?');
-        $stmt->execute([$idProyecto]);
-        if (!$stmt->fetch()) {
-            Response::error('El aula no existe.', 404);
-        }
+        assertProjectOwner($pdo, $idProyecto, (string) Auth::requireUser()['id']);
 
         $nombre = normalizeString((string) ($input['nombre'] ?? ''), 150);
         $descripcion = normalizeString((string) ($input['descripcion'] ?? ''), 5000);
@@ -395,20 +452,36 @@ Router::add('POST', '/proyectos/{id_proyecto}/dispositivos', static function ():
         $dataGuardado = (int) ($input['data_guardado'] ?? 0);
         $sensores = $input['sensores'] ?? [];
 
-        $stmt = $pdo->prepare('INSERT INTO conf_modulos (Id_proyecto, Data_mediciones, Data_guardado, Nombre, Descripcion) VALUES (?, ?, ?, ?, ?)');
-        $stmt->execute([$idProyecto, $dataMediciones, $dataGuardado, $nombre, $descripcion]);
-        $moduloId = (int) $pdo->lastInsertId();
+        if ($nombre === '' || !is_array($sensores) || count($sensores) > 50) {
+            Response::error('La configuración o la lista de sensores no es válida.', 422);
+        }
 
-        foreach ($sensores as $sensor) {
-            $stmt = $pdo->prepare('INSERT INTO sensores_proyecto (id_proyecto, Id_modulo, id_ts, t_registro, t_muestra, descripcion) VALUES (?, ?, ?, ?, ?, ?)');
-            $stmt->execute([
-                $idProyecto,
-                $moduloId,
-                (int) ($sensor['id_ts'] ?? 0),
-                (string) ($sensor['t_registro'] ?? '00:05:00'),
-                (string) ($sensor['t_muestra'] ?? '00:00:30'),
-                normalizeString((string) ($sensor['descripcion'] ?? ''), 1000),
-            ]);
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare('INSERT INTO conf_modulos (Id_proyecto, Data_mediciones, Data_guardado, Nombre, Descripcion) VALUES (?, ?, ?, ?, ?)');
+            $stmt->execute([$idProyecto, $dataMediciones, $dataGuardado, $nombre, $descripcion]);
+            $moduloId = (int) $pdo->lastInsertId();
+
+            $sensorStmt = $pdo->prepare('INSERT INTO sensores_proyecto (id_proyecto, Id_modulo, id_ts, t_registro, t_muestra, descripcion) VALUES (?, ?, ?, ?, ?, ?)');
+            foreach ($sensores as $sensor) {
+                if (!is_array($sensor)) {
+                    Response::error('La lista de sensores contiene un elemento no válido.', 422);
+                }
+                $sensorStmt->execute([
+                    $idProyecto,
+                    $moduloId,
+                    (int) ($sensor['id_ts'] ?? 0),
+                    (string) ($sensor['t_registro'] ?? '00:05:00'),
+                    (string) ($sensor['t_muestra'] ?? '00:00:30'),
+                    normalizeString((string) ($sensor['descripcion'] ?? ''), 1000),
+                ]);
+            }
+            $pdo->commit();
+        } catch (Throwable $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
         }
     } catch (ApiException $exception) {
         throw $exception;
@@ -425,12 +498,11 @@ Router::add('POST', '/proyectos/{id_proyecto}/dispositivos', static function ():
 });
 
 Router::add('GET', '/proyectos/{id_proyecto}/dispositivos', static function (): void {
-    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
-    preg_match('#/proyectos/([0-9]+)/dispositivos$#', $path, $matches);
-    $idProyecto = (int) ($matches[1] ?? 0);
+    $idProyecto = (int) ($_GET['id_proyecto'] ?? 0);
 
     try {
         $pdo = Database::connection();
+        assertProjectOwner($pdo, $idProyecto, (string) Auth::requireUser()['id']);
         $stmt = $pdo->prepare("SELECT m.Id_modulo, m.Nombre, m.Data_mediciones, m.Data_guardado, m.Descripcion, s.id_sp, s.id_ts, s.t_registro, s.t_muestra, s.descripcion AS sensor_descripcion, t.nombre AS tipo_sensor FROM conf_modulos AS m LEFT JOIN sensores_proyecto AS s ON s.id_proyecto = m.Id_proyecto AND s.Id_modulo = m.Id_modulo LEFT JOIN tipo_sensor AS t ON t.id_ts = s.id_ts WHERE m.Id_proyecto = ? ORDER BY m.Id_modulo, s.id_sp");
         $stmt->execute([$idProyecto]);
         $rows = $stmt->fetchAll();
@@ -468,6 +540,7 @@ Router::add('GET', '/proyectos/{id_proyecto}/dispositivos', static function (): 
 });
 
 Router::add('GET', '/veruser', static function (): void {
+    Auth::requireRole('administrador');
     try {
         $pdo = Database::connection();
         $stmt = $pdo->query('SELECT id_usuario, Nombre, Apellido, Institucion, Rol FROM usuarios');
@@ -485,17 +558,37 @@ Router::add('POST', '/sensores', static function (): void {
     $idModulo = (int) ($input['id_modulo'] ?? 0);
     $mediciones = $input['mediciones'] ?? [];
 
-    if ($idProyecto <= 0 || $idModulo <= 0 || !is_array($mediciones) || $mediciones === []) {
+    if ($idProyecto <= 0 || $idModulo <= 0 || !is_array($mediciones) || $mediciones === [] || count($mediciones) > 100) {
         Response::error('Validación fallida.', 422);
     }
 
     $sensorIds = [];
     foreach ($mediciones as $medicion) {
-        $sensorIds[] = (int) ($medicion['id_sp'] ?? 0);
+        if (!is_array($medicion)) {
+            Response::error('La lista de mediciones contiene un elemento no válido.', 422);
+        }
+        $sensorId = (int) ($medicion['id_sp'] ?? 0);
+        $value = $medicion['valor'] ?? null;
+        if ($sensorId <= 0 || !is_numeric($value) || !is_finite((float) $value)) {
+            Response::error('La medición contiene un sensor o valor no válido.', 422);
+        }
+        $sensorIds[] = $sensorId;
     }
 
     try {
         $pdo = Database::connection();
+        $sessionUser = Auth::user();
+        if ($sessionUser !== null) {
+            assertProjectOwner($pdo, $idProyecto, (string) $sessionUser['id']);
+        } else {
+            $allowedProjectIds = array_filter(array_map(
+                'intval',
+                explode(',', (string) Config::get('DEVICE_PROJECT_IDS', ''))
+            ));
+            if (!in_array($idProyecto, $allowedProjectIds, true)) {
+                Response::error('El dispositivo no está autorizado para este proyecto.', 403);
+            }
+        }
         if (count($sensorIds) > 0) {
             $placeholders = implode(',', array_fill(0, count($sensorIds), '?'));
             $stmt = $pdo->prepare("SELECT id_sp FROM sensores_proyecto WHERE id_proyecto = ? AND Id_modulo = ? AND id_sp IN ($placeholders)");
@@ -508,9 +601,18 @@ Router::add('POST', '/sensores', static function (): void {
             }
         }
 
-        foreach ($mediciones as $medicion) {
+        $pdo->beginTransaction();
+        try {
             $stmt = $pdo->prepare('INSERT INTO mediciones (Id_proyecto, Id_modulo, Valor, id_sp) VALUES (?, ?, ?, ?)');
-            $stmt->execute([$idProyecto, $idModulo, (float) ($medicion['valor'] ?? 0), (int) ($medicion['id_sp'] ?? 0)]);
+            foreach ($mediciones as $medicion) {
+                $stmt->execute([$idProyecto, $idModulo, (float) $medicion['valor'], (int) $medicion['id_sp']]);
+            }
+            $pdo->commit();
+        } catch (Throwable $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
         }
     } catch (ApiException $exception) {
         throw $exception;
