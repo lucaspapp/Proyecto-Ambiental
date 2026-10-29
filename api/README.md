@@ -1,6 +1,6 @@
 # API PHP de EcoLab
 
-Esta carpeta contiene una reconstrucción en PHP de la API original de FastAPI para el proyecto EcoLab. Se conserva la estructura funcional y los contratos principales del backend, sin reemplazar ni borrar la implementación en Python original.
+Esta carpeta contiene la API de EcoLab implementada únicamente en PHP.
 
 ## Arquitectura
 
@@ -32,12 +32,11 @@ Esta carpeta contiene una reconstrucción en PHP de la API original de FastAPI p
 
 ## Variables de entorno
 
-Copia `.env.example` a `.env` y ajusta los valores locales:
+Configura `api/.env` con los valores de tu entorno:
 
 ```dotenv
 API_HOST=0.0.0.0
 API_PORT=8003
-API_RELOAD=false
 
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -49,24 +48,15 @@ DB_NAME=cnlab
 ## Ejecución local
 
 ```bash
-cd api-php
-cp .env.example .env
-php -S 0.0.0.0:8003 -t public public/index.php
+php -S 0.0.0.0:8003 -t api/public api/public/index.php
 ```
 
-O con el script incluido:
+También puedes iniciar el servidor integrado desde la carpeta `api/`:
 
 ```bash
-cd api-php
+cd api
 php run.php
 ```
-
-## Migración
-
-1. Se revisa el contrato del backend FastAPI y el consumo del frontend.
-2. Se duplican los endpoints y formatos esenciales en PHP.
-3. Se mantiene la base de datos `cnlab` y se reutiliza el mismo esquema.
-4. Se deja la API Python original intacta como respaldo durante la transición.
 
 ## Seguridad y compatibilidad
 
@@ -80,7 +70,7 @@ php run.php
 Se incluye una prueba simple de contrato:
 
 ```bash
-php api-php/tests/api_contract_test.php
+php api/tests/api_contract_test.php
 ```
 
 La prueba verifica la presencia de los endpoints clave del backend PHP.

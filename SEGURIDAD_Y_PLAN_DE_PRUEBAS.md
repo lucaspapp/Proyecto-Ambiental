@@ -38,7 +38,7 @@ Este documento registra las correcciones estáticas realizadas y deja una instru
 9. Crear/provisionar cuentas docentes y administradoras desde una operación administrativa confiable. El registro público solo crea estudiantes; promocionar roles únicamente después de verificar la identidad del docente.
 10. La interfaz todavía consume Tailwind, Chart.js y fuentes desde CDNs. Servirlos localmente o fijar versiones e integridad SRI, revisar la política CSP y proporcionar una apariencia funcional sin internet. El navegador integrado de la revisión tuvo tiempos de espera al cargar recursos externos.
 11. Confirmar que el frontend muestra errores del servidor y no presenta datos locales de demostración como persistidos. Revisar la duplicación histórica de funciones `clase()`/`sensores()` en `frontend/script.js` y retirar las implementaciones muertas después de comprobar cuál se usa.
-12. Revisar y corregir `api/README.md` y `README.md` si todavía documentan rutas/archivos Python o el directorio inexistente `api-php`; documentar con precisión el flujo de sesión, registro, reset de contraseña y token de sensores.
+12. Revisar `api/README.md` y `README.md` para que describan la API PHP y documentar con precisión el flujo de sesión, registro, restablecimiento de contraseña y token de sensores.
 
 ## Secuencia de despliegue recomendada
 

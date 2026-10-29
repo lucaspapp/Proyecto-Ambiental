@@ -110,7 +110,7 @@ function assertProjectOwner(PDO $pdo, int $projectId, string $userId): void
 }
 
 Router::add('GET', '/', static function (): void {
-    Response::json(['mensaje' => 'API Proyecto Ambiental', 'docs' => '/docs'], 200);
+    Response::json(['mensaje' => 'API Proyecto Ambiental']);
 });
 
 Router::add('GET', '/health', static function (): void {
@@ -630,5 +630,38 @@ Router::add('POST', '/sensores', static function (): void {
 });
 
 Router::add('GET', '/sensores/actual', static function (): void {
-    Response::error('No hay mediciones todavía.', 404);
+    $usuario = (string) Auth::requireUser()['id'];
+
+    try {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare(
+            "SELECT p.Id_proyecto AS id_proyecto, p.Titulo AS proyecto,
+                    m.Id_modulo AS id_modulo, m.id_sp AS id_sp,
+                    COALESCE(t.nombre, 'Sensor') AS sensor,
+                    m.Valor AS valor, m.Tiempo AS tiempo
+             FROM mediciones AS m
+             INNER JOIN proyectos AS p ON p.Id_proyecto = m.Id_proyecto
+             INNER JOIN sensores_proyecto AS s
+                ON s.id_proyecto = m.Id_proyecto
+                AND s.Id_modulo = m.Id_modulo
+                AND s.id_sp = m.id_sp
+             LEFT JOIN tipo_sensor AS t ON t.id_ts = s.id_ts
+             INNER JOIN (
+                SELECT m2.Id_proyecto, m2.Id_modulo, m2.id_sp, MAX(m2.Id_medicion) AS ultimo_id
+                FROM mediciones AS m2
+                INNER JOIN proyectos AS propios ON propios.Id_proyecto = m2.Id_proyecto
+                WHERE propios.Usuario = ?
+                GROUP BY m2.Id_proyecto, m2.Id_modulo, m2.id_sp
+             ) AS ultimas ON ultimas.ultimo_id = m.Id_medicion
+             WHERE p.Usuario = ?
+             ORDER BY m.Tiempo DESC, m.Id_medicion DESC
+             LIMIT 50"
+        );
+        $stmt->execute([$usuario, $usuario]);
+        $mediciones = $stmt->fetchAll();
+    } catch (PDOException $exception) {
+        throw Database::handleException($exception);
+    }
+
+    Response::json(['mediciones' => $mediciones]);
 });

@@ -21,8 +21,8 @@ $requiredRouters = [
     'POST:/aulas',
     'POST:/aulas/unirse',
     'GET:/aulas/{id_aula}/miembros',
-    'POST:/sensores',
     'GET:/sensores/actual',
+    'POST:/sensores',
 ];
 
 foreach ($requiredRouters as $route) {

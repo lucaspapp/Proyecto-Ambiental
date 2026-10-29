@@ -10,14 +10,14 @@ disponibles para trabajar en clase.
 ```text
 api/
   .env                 Configuración local de la API y MySQL/MariaDB
-  run.py               Arranque del servidor
-  app/main.py          Endpoints FastAPI
-  app/conexion.py      Conexión a la base de datos
+  run.php              Arranque local del servidor PHP
+  public/index.php     Entrada HTTP de la API
+  routes/api.php       Endpoints de la API
+  src/                 Configuración, autenticación y acceso a datos
 frontend/
   index.html           Estructura y estilos de la aplicación
   script.js            Lógica del frontend
 bd.sql                 Tablas iniciales de la base de datos
-requirements.text      Dependencias de Python
 ```
 
 ## 1. Preparar la base de datos
@@ -38,23 +38,13 @@ Si ya tenías una instalación anterior que no incluía las aulas, la API crea
 automáticamente `aulas` y `aula_miembros` cuando se abre la sección **Mi
 clase**.
 
-## 2. Iniciar la API en Windows
+## 2. Iniciar la API PHP localmente
 
-Abre una terminal en la carpeta del proyecto:
-
-```powershell
-cd api
-python -m venv ..\.venv
-..\.venv\Scripts\python.exe -m pip install -r ..\requirements.text
-```
-
-Edita [`api/.env`](api/.env) con los datos de MySQL:
+Configura `api/.env` con los datos de MySQL:
 
 ```dotenv
 API_HOST=0.0.0.0
 API_PORT=8003
-API_RELOAD=true
-
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_USER=root
@@ -62,33 +52,24 @@ DB_PASSWORD=
 DB_NAME=cnlab
 ```
 
-`DB_PASSWORD` puede quedar vacío si tu instalación local de MySQL no usa
-contraseña. En una instalación compartida o de producción, usa una contraseña
-segura.
+`DB_PASSWORD` puede quedar vacío si tu instalación local no usa contraseña.
+En producción, usa una contraseña segura y no publiques el archivo `.env`.
+Desde la carpeta del proyecto, inicia el servidor PHP:
 
-Inicia la API:
-
-```powershell
-..\.venv\Scripts\python.exe run.py
+```bash
+php -S 0.0.0.0:8003 -t api/public api/public/index.php
 ```
 
 Comprueba que funciona:
 
 - API: <http://127.0.0.1:8003>
-- Swagger: <http://127.0.0.1:8003/docs>
 - Estado: <http://127.0.0.1:8003/health>
 
 ## 3. Abrir el frontend
 
 Con la API iniciada, abre [`frontend/index.html`](frontend/index.html) en el
-navegador. Si la API está en otra computadora, cambia `API_PUBLIC_URL` en
-`api/.env` por una dirección accesible desde la red, por ejemplo:
-
-```dotenv
-API_PUBLIC_URL=http://192.168.1.50:8003
-```
-
-También puedes indicar la dirección desde la consola del navegador:
+navegador. Si la API está en otra computadora, configura la URL de API desde
+la consola del navegador:
 
 ```js
 localStorage.setItem("ecolab_api_url", "http://192.168.1.50:8003");
@@ -98,7 +79,7 @@ location.reload();
 ## 4. Crear usuarios y aulas
 
 1. En el frontend selecciona **Crear cuenta**.
-2. Completa nombre, apellido, correo, rol y una contraseña de al menos 8
+2. Completa nombre, apellido, correo y una contraseña de al menos 12
    caracteres.
 3. Inicia sesión.
 4. Un docente o administrador puede crear un aula desde **Mi clase**.
@@ -175,7 +156,7 @@ El `503` significa que la API no pudo completar la operación con MySQL/MariaDB.
    [`api/.env`](api/.env).
 3. Confirma que importaste `bd.sql` en la base `cnlab`.
 4. Abre <http://127.0.0.1:8003/health> para confirmar que la API está viva.
-5. Mira la terminal donde ejecutaste `run.py`: ahora el mensaje distingue
+5. Revisa los logs del servidor PHP: el mensaje distingue
    entre servicio apagado, credenciales incorrectas y base inexistente.
 
 Si aparece `Ya existe una cuenta`, utiliza otro correo: `id_usuario` es único.
@@ -201,13 +182,15 @@ su correo exista en la tabla `usuarios`.
 | `POST` | `/sensores` | Guardar mediciones de la ESP32 |
 | `GET` | `/sensores/actual` | Consultar la última tanda |
 
-Para ver todos los campos y probar las rutas, usa Swagger en `/docs`.
+La API PHP no incluye una interfaz Swagger; consulta las rutas disponibles en
+[`api/README.md`](api/README.md).
 
 ## Uso en una red escolar
 
-Configura `API_HOST=0.0.0.0`, permite el puerto `8003` en el firewall y usa la
-IP de la computadora que ejecuta la API en `API_PUBLIC_URL`. Los equipos de
-los alumnos deben estar en la misma red y poder acceder a esa IP.
+Configura `API_HOST=0.0.0.0`, permite el puerto `8003` en el firewall y apunta
+el frontend a la IP de la computadora que ejecuta la API. Los equipos de los
+alumnos deben estar en la misma red y poder acceder a esa IP. La URL se puede
+definir en el navegador mediante `localStorage` como se indica arriba.
 
-Para producción, desactiva `API_RELOAD`, restringe los orígenes CORS en
-`api/app/main.py` y usa credenciales de base de datos con permisos mínimos.
+Para producción, configura `CORS_ALLOWED_ORIGINS` con el origen exacto y usa
+credenciales de base de datos con permisos mínimos.
