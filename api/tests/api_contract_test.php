@@ -17,10 +17,13 @@ $requiredRouters = [
     'POST:/auth/logout',
     'POST:/auth/change-password',
     'POST:/crearuser',
+    'GET:/proyectos',
+    'GET:/tipos-sensor',
     'GET:/aulas',
     'POST:/aulas',
     'POST:/aulas/unirse',
     'GET:/aulas/{id_aula}/miembros',
+    'GET:/aulas/{id_aula}/proyectos',
     'GET:/sensores/actual',
     'POST:/sensores',
 ];

@@ -388,26 +388,130 @@ Router::add('GET', '/aulas/{id_aula}/miembros', static function (): void {
     Response::json(['miembros' => $miembros]);
 });
 
+Router::add('GET', '/aulas/{id_aula}/proyectos', static function (): void {
+    $idAula = (int) ($_GET['id_aula'] ?? 0);
+    $usuario = (string) Auth::requireUser()['id'];
+
+    try {
+        $pdo = Database::connection();
+        assertClassMembership($pdo, $idAula, $usuario);
+        $stmt = $pdo->prepare(
+            "SELECT p.Id_proyecto AS id_proyecto, p.Titulo AS titulo, p.Descripcion AS descripcion,
+                    p.Usuario AS propietario, m.Id_modulo AS id_modulo, m.Nombre AS modulo,
+                    m.Descripcion AS modulo_descripcion, s.id_sp, s.id_ts,
+                    s.t_registro, s.t_muestra, s.descripcion AS sensor_descripcion,
+                    t.nombre AS tipo_sensor
+             FROM proyectos AS p
+             LEFT JOIN conf_modulos AS m ON m.Id_proyecto = p.Id_proyecto
+             LEFT JOIN sensores_proyecto AS s
+                ON s.id_proyecto = p.Id_proyecto AND s.Id_modulo = m.Id_modulo
+             LEFT JOIN tipo_sensor AS t ON t.id_ts = s.id_ts
+             WHERE p.id_aula = ?
+             ORDER BY p.Id_proyecto DESC, m.Id_modulo, s.id_sp"
+        );
+        $stmt->execute([$idAula]);
+        $rows = $stmt->fetchAll();
+    } catch (PDOException $exception) {
+        throw Database::handleException($exception);
+    }
+
+    $proyectos = [];
+    foreach ($rows as $row) {
+        $projectId = (int) $row['id_proyecto'];
+        if (!isset($proyectos[$projectId])) {
+            $proyectos[$projectId] = [
+                'id_proyecto' => $projectId,
+                'titulo' => $row['titulo'],
+                'descripcion' => $row['descripcion'],
+                'propietario' => $row['propietario'],
+                'medidores' => [],
+            ];
+        }
+
+        if ($row['id_modulo'] !== null) {
+            $moduleId = (int) $row['id_modulo'];
+            if (!isset($proyectos[$projectId]['medidores'][$moduleId])) {
+                $proyectos[$projectId]['medidores'][$moduleId] = [
+                    'id_modulo' => $moduleId,
+                    'nombre' => $row['modulo'],
+                    'descripcion' => $row['modulo_descripcion'],
+                    'sensores' => [],
+                ];
+            }
+            if ($row['id_sp'] !== null) {
+                $proyectos[$projectId]['medidores'][$moduleId]['sensores'][] = [
+                    'id_sp' => (int) $row['id_sp'],
+                    'id_ts' => (int) $row['id_ts'],
+                    'tipo' => $row['tipo_sensor'],
+                    'descripcion' => $row['sensor_descripcion'],
+                    't_registro' => $row['t_registro'],
+                    't_muestra' => $row['t_muestra'],
+                ];
+            }
+        }
+    }
+
+    foreach ($proyectos as &$proyecto) {
+        $proyecto['medidores'] = array_values($proyecto['medidores']);
+    }
+    unset($proyecto);
+
+    Response::json(['proyectos' => array_values($proyectos)]);
+});
+
 Router::add('POST', '/crearproyecto', static function (): void {
     $project = $_POST;
     $sessionUser = Auth::requireUser();
     $usuario = (string) $sessionUser['id'];
     $titulo = normalizeString((string) ($project['Titulo'] ?? ''), 200);
     $descripcion = normalizeString((string) ($project['Descripcion'] ?? ''), 5000);
+    $idAula = (int) ($project['id_aula'] ?? 0);
 
-    if ($usuario === '' || $titulo === '') {
+    if ($usuario === '' || $titulo === '' || $idAula <= 0) {
         Response::error('Validación fallida.', 422);
     }
 
     try {
         $pdo = Database::connection();
-        $stmt = $pdo->prepare('INSERT INTO proyectos (Usuario, Titulo, Descripcion) VALUES (?, ?, ?)');
-        $stmt->execute([$usuario, $titulo, $descripcion]);
+        assertClassMembership($pdo, $idAula, $usuario);
+        $stmt = $pdo->prepare('INSERT INTO proyectos (Usuario, id_aula, Titulo, Descripcion) VALUES (?, ?, ?, ?)');
+        $stmt->execute([$usuario, $idAula, $titulo, $descripcion]);
     } catch (PDOException $exception) {
         throw Database::handleException($exception);
     }
 
-    Response::json(['mensaje' => 'Proyecto creado correctamente'], 201);
+    Response::json([
+        'mensaje' => 'Proyecto creado correctamente',
+        'id_proyecto' => (int) $pdo->lastInsertId(),
+        'id_aula' => $idAula,
+        'titulo' => $titulo,
+    ], 201);
+});
+
+Router::add('GET', '/proyectos', static function (): void {
+    $usuario = (string) Auth::requireUser()['id'];
+
+    try {
+        $pdo = Database::connection();
+        $stmt = $pdo->prepare('SELECT p.Id_proyecto AS id_proyecto, p.id_aula, p.Titulo AS titulo, p.Descripcion AS descripcion, a.nombre AS aula FROM proyectos AS p INNER JOIN aulas AS a ON a.id_aula = p.id_aula INNER JOIN aula_miembros AS am ON am.id_aula = p.id_aula AND am.id_usuario = ? ORDER BY p.Id_proyecto DESC');
+        $stmt->execute([$usuario]);
+        $proyectos = $stmt->fetchAll();
+    } catch (PDOException $exception) {
+        throw Database::handleException($exception);
+    }
+
+    Response::json(['proyectos' => $proyectos]);
+});
+
+Router::add('GET', '/tipos-sensor', static function (): void {
+    try {
+        $pdo = Database::connection();
+        $tipos = $pdo->query('SELECT id_ts, nombre, Descripcion AS descripcion, k_conversion FROM tipo_sensor ORDER BY nombre')->fetchAll();
+    } catch (PDOException $exception) {
+        throw Database::handleException($exception);
+    }
+
+    Response::json(['tipos' => $tipos]);
 });
 
 Router::add('POST', '/crearconfig', static function (): void {
@@ -502,7 +606,14 @@ Router::add('GET', '/proyectos/{id_proyecto}/dispositivos', static function (): 
 
     try {
         $pdo = Database::connection();
-        assertProjectOwner($pdo, $idProyecto, (string) Auth::requireUser()['id']);
+        $usuario = (string) Auth::requireUser()['id'];
+        $projectStmt = $pdo->prepare('SELECT id_aula FROM proyectos WHERE Id_proyecto = ?');
+        $projectStmt->execute([$idProyecto]);
+        $projectAula = $projectStmt->fetchColumn();
+        if ($projectAula === false) {
+            Response::error('El proyecto no existe.', 404);
+        }
+        assertClassMembership($pdo, (int) $projectAula, $usuario);
         $stmt = $pdo->prepare("SELECT m.Id_modulo, m.Nombre, m.Data_mediciones, m.Data_guardado, m.Descripcion, s.id_sp, s.id_ts, s.t_registro, s.t_muestra, s.descripcion AS sensor_descripcion, t.nombre AS tipo_sensor FROM conf_modulos AS m LEFT JOIN sensores_proyecto AS s ON s.id_proyecto = m.Id_proyecto AND s.Id_modulo = m.Id_modulo LEFT JOIN tipo_sensor AS t ON t.id_ts = s.id_ts WHERE m.Id_proyecto = ? ORDER BY m.Id_modulo, s.id_sp");
         $stmt->execute([$idProyecto]);
         $rows = $stmt->fetchAll();
@@ -631,6 +742,8 @@ Router::add('POST', '/sensores', static function (): void {
 
 Router::add('GET', '/sensores/actual', static function (): void {
     $usuario = (string) Auth::requireUser()['id'];
+    $idProyecto = (int) ($_GET['id_proyecto'] ?? 0);
+    $projectFilter = $idProyecto > 0 ? 'AND p.Id_proyecto = ?' : '';
 
     try {
         $pdo = Database::connection();
@@ -650,14 +763,29 @@ Router::add('GET', '/sensores/actual', static function (): void {
                 SELECT m2.Id_proyecto, m2.Id_modulo, m2.id_sp, MAX(m2.Id_medicion) AS ultimo_id
                 FROM mediciones AS m2
                 INNER JOIN proyectos AS propios ON propios.Id_proyecto = m2.Id_proyecto
-                WHERE propios.Usuario = ?
+                INNER JOIN aula_miembros AS miembros
+                    ON miembros.id_aula = propios.id_aula AND miembros.id_usuario = ?
+                WHERE 1 = 1 " . ($idProyecto > 0 ? 'AND propios.Id_proyecto = ?' : '') . "
                 GROUP BY m2.Id_proyecto, m2.Id_modulo, m2.id_sp
              ) AS ultimas ON ultimas.ultimo_id = m.Id_medicion
-             WHERE p.Usuario = ?
+             WHERE 1 = 1
+               AND EXISTS (
+                   SELECT 1 FROM aula_miembros AS acceso
+                   WHERE acceso.id_aula = p.id_aula AND acceso.id_usuario = ?
+               )
+               " . $projectFilter . "
              ORDER BY m.Tiempo DESC, m.Id_medicion DESC
              LIMIT 50"
         );
-        $stmt->execute([$usuario, $usuario]);
+        $params = [$usuario];
+        if ($idProyecto > 0) {
+            $params[] = $idProyecto;
+        }
+        $params[] = $usuario;
+        if ($idProyecto > 0) {
+            $params[] = $idProyecto;
+        }
+        $stmt->execute($params);
         $mediciones = $stmt->fetchAll();
     } catch (PDOException $exception) {
         throw Database::handleException($exception);

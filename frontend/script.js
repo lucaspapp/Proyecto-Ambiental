@@ -8,10 +8,21 @@
         classroomsLoading: false,
         classroomsError: "",
         classroomsLoaded: false,
+        classroomProjects: {},
+        classroomProjectsLoading: false,
+        selectedProjectsClass: "",
         measurements: [],
         measurementsLoading: false,
         measurementsError: "",
         measurementsLoaded: false,
+        projects: [],
+        projectsLoaded: false,
+        projectsLoading: false,
+        selectedProjectId: "",
+        dashboardRefreshTimer: null,
+        sensorTypes: [],
+        sensorSetupLoading: false,
+        sensorSetupError: "",
       };
       const resolveApiBaseUrl = () => {
         if (window.ECOLAB_API_URL) return String(window.ECOLAB_API_URL).replace(/\/$/, "");
@@ -82,10 +93,24 @@
         state.classroomsLoading = false;
         state.classroomsError = "";
         state.classroomsLoaded = false;
+        state.classroomProjects = {};
+        state.classroomProjectsLoading = false;
+        state.selectedProjectsClass = "";
         state.measurements = [];
         state.measurementsLoading = false;
         state.measurementsError = "";
         state.measurementsLoaded = false;
+        state.projects = [];
+        state.projectsLoaded = false;
+        state.projectsLoading = false;
+        state.selectedProjectId = "";
+        if (state.dashboardRefreshTimer) {
+          clearInterval(state.dashboardRefreshTimer);
+          state.dashboardRefreshTimer = null;
+        }
+        state.sensorTypes = [];
+        state.sensorSetupLoading = false;
+        state.sensorSetupError = "";
       }
       const esc = (value) =>
         String(value ?? "").replace(
@@ -304,6 +329,9 @@
       }
 
       function dashboard() {
+        const projectOptions = state.projects.map((project) =>
+          `<option value="${esc(project.id_proyecto)}" ${String(project.id_proyecto) === String(state.selectedProjectId) ? "selected" : ""}>${esc(project.titulo)} · ${esc(project.aula || "Aula")}</option>`,
+        ).join("");
         const classroomCards = state.classrooms.map((classroom) =>
           `<article class="rounded-xl border border-white/10 p-4"><h4 class="font-medium">${esc(classroom.name)}</h4><p class="mt-1 text-xs text-slate-400">${Number(classroom.memberCount)} integrantes</p></article>`,
         ).join("");
@@ -322,10 +350,36 @@
                 ).join("")}</div>`
               : `<p class="text-sm text-slate-400">Todavía no hay mediciones registradas en tus proyectos.</p>`;
         const measurementCount = state.measurementsLoaded ? state.measurements.length : "—";
-        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-slate-400">Buen día, ${esc(state.user?.nombre || "explorador")} 👋</p><h2 class="mt-1 text-3xl font-bold">Tu espacio ambiental</h2></div><button data-nav="clase" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night hover:bg-white">${icon("plus", "h-4 w-4 inline")} Crear o unirme a una clase</button></div><div class="grid gap-5 sm:grid-cols-2"><div>${stat(state.classroomsLoaded ? state.classrooms.length : "—", "Mis aulas", state.classroomsError ? "No disponibles" : "Datos sincronizados con la API", "cyan")}</div><div>${stat(measurementCount, "Mediciones recientes", "Registros reales de tus proyectos", "leaf")}</div></div><div class="mt-5 grid gap-5 lg:grid-cols-2"><section class="glass rounded-2xl p-6"><div class="mb-5 flex items-center justify-between"><h3 class="font-semibold">Mis aulas</h3><button data-nav="clase" class="text-xs text-cyan">Ver aulas</button></div><div class="space-y-3">${classroomsContent}</div></section><section class="glass rounded-2xl p-6"><div class="mb-5 flex items-center justify-between"><h3 class="font-semibold">Mediciones recientes</h3><button id="refresh-measurements" class="text-xs text-cyan">Actualizar</button></div>${measurementsContent}</section></div><section class="glass mt-5 rounded-2xl p-6"><h3 class="font-semibold">Recursos para aprender</h3><div class="mt-5 grid gap-4 md:grid-cols-3">${resource("01", "¿Qué es un ecosistema?", "Conceptos base para comenzar", "cyan")}${resource("02", "Leer una gráfica", "Interpretá tendencias y cambios", "leaf")}${resource("03", "Tu primera medición", "Guía rápida del sensor", "soil")}</div></section>`;
+        const projectPicker = state.projectsLoading
+          ? `<p class="text-sm text-slate-400">Cargando proyectos…</p>`
+          : projectOptions
+            ? `<label class="block text-sm text-slate-300">Proyecto para ver en vivo<select id="dashboard-project" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3">${projectOptions}</select></label>`
+            : `<p class="text-sm text-slate-400">Tus aulas todavía no tienen proyectos.</p>`;
+        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-slate-400">Buen día, ${esc(state.user?.nombre || "explorador")} 👋</p><h2 class="mt-1 text-3xl font-bold">Tu espacio ambiental</h2></div><button data-nav="clase" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night hover:bg-white">${icon("plus", "h-4 w-4 inline")} Crear o unirme a una clase</button></div><div class="grid gap-5 sm:grid-cols-2"><div>${stat(state.classroomsLoaded ? state.classrooms.length : "—", "Mis aulas", state.classroomsError ? "No disponibles" : "Datos sincronizados con la API", "cyan")}</div><div>${stat(measurementCount, "Mediciones recientes", "Registros reales de tus proyectos", "leaf")}</div></div><div class="mt-5 grid gap-5 lg:grid-cols-2"><section class="glass rounded-2xl p-6"><div class="mb-5 flex items-center justify-between"><h3 class="font-semibold">Mis aulas</h3><button data-nav="clase" class="text-xs text-cyan">Ver aulas</button></div><div class="space-y-3">${classroomsContent}</div></section><section class="glass rounded-2xl p-6"><div class="mb-5 flex items-center justify-between"><h3 class="font-semibold">Mediciones en vivo</h3><button id="refresh-measurements" class="text-xs text-cyan">Actualizar</button></div>${projectPicker}<div class="mt-4">${measurementsContent}</div></section></div><section class="glass mt-5 rounded-2xl p-6"><h3 class="font-semibold">Recursos para aprender</h3><div class="mt-5 grid gap-4 md:grid-cols-3">${resource("01", "¿Qué es un ecosistema?", "Conceptos base para comenzar", "cyan")}${resource("02", "Leer una gráfica", "Interpretá tendencias y cambios", "leaf")}${resource("03", "Tu primera medición", "Guía rápida del sensor", "soil")}</div></section>`;
         mount(shell(content, "Dashboard"), "dashboard");
         document.querySelector("#refresh-measurements")?.addEventListener("click", cargarMediciones);
+        document.querySelector("#dashboard-project")?.addEventListener("change", (event) => {
+          state.selectedProjectId = event.target.value;
+          state.measurementsLoaded = false;
+          cargarMediciones();
+        });
+        if (state.dashboardRefreshTimer) {
+          clearInterval(state.dashboardRefreshTimer);
+        }
+        state.dashboardRefreshTimer = setInterval(() => {
+          if (location.hash === "#dashboard" && !state.measurementsLoading && state.selectedProjectId) {
+            cargarMediciones();
+          }
+        }, 5000);
         if (!state.classroomsLoading && !state.classroomsLoaded) cargarAulas();
+        if (!state.projectsLoaded && !state.projectsLoading) {
+          state.projectsLoading = true;
+          cargarProyectos().finally(() => {
+            state.projectsLoading = false;
+            dashboard();
+            cargarMediciones();
+          });
+        }
         if (!state.measurementsLoading && !state.measurementsLoaded) cargarMediciones();
       }
 
@@ -366,7 +420,7 @@
           state.user?.role === "administrador";
         const cards = state.classrooms
           .map((classroom) => {
-            return `<article class="glass rounded-2xl p-6"><span class="text-xs text-cyan">${esc(classroom.code || "Sin código")}</span><h3 class="mt-3 text-xl font-semibold">${esc(classroom.name)}</h3><p class="mt-2 text-sm text-slate-400">${esc(classroom.descripcion || "Sin descripción.")}</p><p class="mt-4 text-xs text-slate-500">${Number(classroom.memberCount)} integrantes</p><button data-members-class="${classroom.id}" class="mt-5 w-full rounded-xl border border-white/10 py-2 text-xs text-slate-400">Ver miembros</button></article>`;
+            return `<article class="glass rounded-2xl p-6"><span class="text-xs text-cyan">${esc(classroom.code || "Sin código")}</span><h3 class="mt-3 text-xl font-semibold">${esc(classroom.name)}</h3><p class="mt-2 text-sm text-slate-400">${esc(classroom.descripcion || "Sin descripción.")}</p><p class="mt-4 text-xs text-slate-500">${Number(classroom.memberCount)} integrantes</p><div class="mt-5 grid gap-2"><button data-projects-class="${classroom.id}" class="w-full rounded-xl bg-cyan/10 py-2 text-xs text-cyan">Ver proyectos</button><button data-members-class="${classroom.id}" class="w-full rounded-xl border border-white/10 py-2 text-xs text-slate-400">Ver miembros</button></div></article>`;
           })
           .join("");
         const status = state.classroomsLoading
@@ -378,10 +432,14 @@
         const membersPanel = state.selectedMembersClass
           ? `<div class="glass mt-5 rounded-2xl p-6"><h3 class="font-semibold">Miembros del aula</h3><div class="mt-4 grid gap-2 sm:grid-cols-2">${selectedMembers.map((member) => `<div class="rounded-xl bg-white/[.03] p-3 text-sm">${esc([member.Nombre, member.Apellido].filter(Boolean).join(" ") || member.nombre || member.name || member.id_usuario || "Usuario")}<span class="mt-1 block text-xs text-slate-500">${esc(roleName(member.Rol || member.rol_aula || member.rol || member.role || "Miembro"))}</span></div>`).join("") || `<p class="text-sm text-slate-500">Todavía no hay miembros.</p>`}</div></div>`
           : "";
+        const selectedProjects = state.classroomProjects[state.selectedProjectsClass] || [];
+        const projectsPanel = state.selectedProjectsClass
+          ? `<section class="glass mt-5 rounded-2xl p-6"><h3 class="font-semibold">Proyectos del aula</h3>${state.classroomProjectsLoading ? `<p class="mt-4 text-sm text-slate-400">Cargando proyectos…</p>` : selectedProjects.length ? `<div class="mt-4 space-y-4">${selectedProjects.map((project) => `<article class="rounded-xl border border-white/10 p-4"><h4 class="text-lg font-semibold text-cyan">${esc(project.titulo)}</h4><p class="mt-2 text-sm text-slate-400">${esc(project.descripcion || "Sin descripción.")}</p><p class="mt-3 text-xs text-slate-500">${project.medidores.length} medidor(es)</p>${project.medidores.length ? `<div class="mt-4 grid gap-3 md:grid-cols-2">${project.medidores.map((meter) => `<div class="rounded-xl bg-white/[.03] p-4"><p class="font-medium">${esc(meter.nombre)}</p><p class="mt-1 text-xs text-slate-400">${esc(meter.descripcion || "Sin descripción.")}</p>${meter.sensores.length ? `<ul class="mt-3 space-y-1 text-xs text-slate-500">${meter.sensores.map((sensor) => `<li><b class="text-slate-300">${esc(sensor.tipo || "Sensor")}</b>${sensor.descripcion ? ` · ${esc(sensor.descripcion)}` : ""}</li>`).join("")}</ul>` : `<p class="mt-3 text-xs text-slate-500">Sin sensores configurados.</p>`}</div>`).join("")}</div>` : `<p class="mt-3 text-sm text-slate-500">Este proyecto todavía no tiene medidores.</p>`}</article>`).join("")}</div>` : `<p class="mt-4 text-sm text-slate-500">El aula todavía no tiene proyectos.</p>`}</section>`
+          : "";
         const emptyState = state.classroomsLoading || state.classroomsError || state.classrooms.length > 0
           ? ""
           : `<div class="glass rounded-2xl p-8 text-sm text-slate-400 md:col-span-2 xl:col-span-3">Todavía no pertenecés a ninguna aula. Podés crear una o unirte con un código.</div>`;
-        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-cyan">Aula colaborativa</p><h2 class="mt-1 text-3xl font-bold">Mis aulas</h2><p class="mt-2 text-sm text-slate-400">Aulas y miembros cargados desde la API.</p>${status}</div>${canManage ? `<button id="new-class" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night">+ Crear aula</button>` : ""}</div><div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">${cards}${emptyState}</div><div class="mt-5 flex flex-wrap gap-3"><button id="join-class" class="rounded-xl border border-cyan/30 px-4 py-2 text-sm text-cyan">+ Unirme con un código</button><button id="reload-classrooms" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-400">Actualizar</button></div>${membersPanel}`;
+        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-cyan">Aula colaborativa</p><h2 class="mt-1 text-3xl font-bold">Mis aulas</h2><p class="mt-2 text-sm text-slate-400">Aulas, proyectos y miembros cargados desde la API.</p>${status}</div>${canManage ? `<button id="new-class" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night">+ Crear aula</button>` : ""}</div><div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">${cards}${emptyState}</div><div class="mt-5 flex flex-wrap gap-3"><button id="join-class" class="rounded-xl border border-cyan/30 px-4 py-2 text-sm text-cyan">+ Unirme con un código</button><button id="reload-classrooms" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-400">Actualizar</button></div>${projectsPanel}${membersPanel}`;
         mount(shell(content, "Mi clase"), "clase");
         document.querySelector("#new-class")?.addEventListener("click", async () => {
           const name = prompt("Nombre del aula");
@@ -435,7 +493,26 @@
         document.querySelectorAll("[data-members-class]").forEach((button) => {
           button.onclick = () => cargarMiembros(button.dataset.membersClass);
         });
+        document.querySelectorAll("[data-projects-class]").forEach((button) => {
+          button.onclick = () => cargarProyectosAula(button.dataset.projectsClass);
+        });
         if (!state.classroomsLoading && !state.classroomsLoaded) cargarAulas();
+      }
+
+      async function cargarProyectosAula(classId) {
+        state.selectedProjectsClass = classId;
+        state.classroomProjectsLoading = true;
+        clase();
+        try {
+          const data = await apiRequest(`/aulas/${encodeURIComponent(classId)}/proyectos`);
+          state.classroomProjects[classId] = Array.isArray(data.proyectos) ? data.proyectos : [];
+        } catch (error) {
+          state.classroomProjects[classId] = [];
+          toast(`No se pudieron cargar los proyectos: ${error.message}`, true);
+        } finally {
+          state.classroomProjectsLoading = false;
+          clase();
+        }
       }
 
       async function cargarAulas() {
@@ -457,12 +534,29 @@
         }
       }
 
+      async function cargarProyectos() {
+        try {
+          const data = await apiRequest("/proyectos");
+          state.projects = Array.isArray(data.proyectos) ? data.proyectos : [];
+          state.projectsLoaded = true;
+          if (!state.projects.some((project) => String(project.id_proyecto) === String(state.selectedProjectId))) {
+            state.selectedProjectId = state.projects[0]?.id_proyecto ? String(state.projects[0].id_proyecto) : "";
+          }
+        } catch (error) {
+          state.projectsLoaded = true;
+          state.sensorSetupError = error.name === "AbortError" ? "tiempo de espera agotado" : error.message;
+        }
+      }
+
       async function cargarMediciones() {
         state.measurementsLoading = true;
         state.measurementsError = "";
         render();
         try {
-          const data = await apiRequest("/sensores/actual");
+          const query = state.selectedProjectId
+            ? `?id_proyecto=${encodeURIComponent(state.selectedProjectId)}`
+            : "";
+          const data = await apiRequest(`/sensores/actual${query}`);
           const measurements = data.mediciones || [];
           if (!Array.isArray(measurements)) throw new Error("Formato de mediciones no válido.");
           state.measurements = measurements;
@@ -495,11 +589,87 @@
           toast(`No se pudieron cargar los miembros: ${error.message}`, true);
         }
       }
+      async function cargarRecursosSensores() {
+        state.sensorSetupLoading = true;
+        state.sensorSetupError = "";
+        try {
+          const [projectsData, typesData, classroomsData] = await Promise.all([
+            apiRequest("/proyectos"),
+            apiRequest("/tipos-sensor"),
+            apiRequest("/aulas"),
+          ]);
+          state.projects = Array.isArray(projectsData.proyectos) ? projectsData.proyectos : [];
+          state.projectsLoaded = true;
+          state.sensorTypes = Array.isArray(typesData.tipos) ? typesData.tipos : [];
+          const classrooms = Array.isArray(classroomsData.aulas) ? classroomsData.aulas : [];
+          state.classrooms = classrooms.map(classroomFromApi);
+          if (!state.sensorTypes.length) {
+            throw new Error("No hay tipos de sensor configurados en la base de datos.");
+          }
+        } catch (error) {
+          state.sensorSetupError = error.name === "AbortError" ? "tiempo de espera agotado" : error.message;
+        } finally {
+          state.sensorSetupLoading = false;
+          sensores();
+        }
+      }
+
       function sensores() {
-        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-leaf">Laboratorio de datos</p><h2 class="mt-1 text-3xl font-bold">Mediciones</h2><p class="mt-2 text-sm text-slate-400">Últimos registros guardados en tus proyectos.</p></div><button id="refresh-measurements" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300">Actualizar</button></div><section class="glass rounded-2xl p-6">${state.measurementsLoading ? `<p class="text-sm text-slate-400">Cargando mediciones…</p>` : state.measurementsError ? `<p class="text-sm text-red-300">No se pudieron cargar las mediciones: ${esc(state.measurementsError)}</p>` : state.measurements.length ? `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="border-b border-white/10 text-xs uppercase text-slate-500"><tr><th class="p-3">Proyecto</th><th class="p-3">Sensor</th><th class="p-3">Valor</th><th class="p-3">Fecha</th></tr></thead><tbody>${state.measurements.map((measurement) => `<tr class="border-b border-white/5"><td class="p-3">${esc(measurement.proyecto)}</td><td class="p-3">${esc(measurement.sensor)}</td><td class="p-3">${esc(measurement.valor)}</td><td class="p-3 text-slate-400">${esc(measurement.tiempo)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="text-sm text-slate-400">Todavía no hay mediciones en tus proyectos.</p>`}</section>`;
+        const projectOptions = state.projects.map((project) =>
+          `<option value="${esc(project.id_proyecto)}">${esc(project.titulo)} · ${esc(project.aula || "Aula")}</option>`,
+        ).join("");
+        const classroomOptions = state.classrooms.map((classroom) =>
+          `<option value="${esc(classroom.id)}">${esc(classroom.name)}</option>`,
+        ).join("");
+        const typeOptions = state.sensorTypes.map((type) =>
+          `<option value="${esc(type.id_ts)}">${esc(type.nombre)}</option>`,
+        ).join("");
+        const setupMessage = state.sensorSetupError
+          ? `<p class="mt-3 text-sm text-red-300">${esc(state.sensorSetupError)}</p>`
+          : state.sensorSetupLoading
+            ? `<p class="mt-3 text-sm text-slate-400">Cargando proyectos y tipos de sensor…</p>`
+            : "";
+        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-leaf">Laboratorio de datos</p><h2 class="mt-1 text-3xl font-bold">Mediciones</h2><p class="mt-2 text-sm text-slate-400">Creá proyectos dentro de un aula y agregá medidores.</p></div><button id="refresh-measurements" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300">Actualizar</button></div><section class="glass mb-5 rounded-2xl p-6"><h3 class="font-semibold">Crear proyecto</h3><form id="project-form" class="mt-4 grid gap-3 md:grid-cols-3"><input name="Titulo" required maxlength="200" placeholder="Ej. Patio escolar" class="rounded-xl border border-white/10 bg-night px-4 py-3 text-sm outline-none focus:border-cyan"><input name="Descripcion" maxlength="5000" placeholder="Descripción (opcional)" class="rounded-xl border border-white/10 bg-night px-4 py-3 text-sm outline-none focus:border-cyan"><select name="id_aula" required class="rounded-xl border border-white/10 bg-night px-4 py-3 text-sm">${classroomOptions || `<option value="">Primero creá o uníte a un aula</option>`}</select><button ${!classroomOptions ? "disabled" : ""} class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night disabled:cursor-not-allowed disabled:opacity-50 md:col-span-3">Crear proyecto en el aula</button></form></section><section class="glass mb-5 rounded-2xl p-6"><h3 class="font-semibold">Agregar medidor</h3><p class="mt-1 text-sm text-slate-400">Un medidor es un módulo con uno o más sensores del proyecto.</p>${setupMessage}<form id="sensor-form" class="mt-4 grid gap-3 md:grid-cols-2"><label class="text-sm text-slate-300">Proyecto<select name="proyecto" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3">${projectOptions || `<option value="">Primero creá un proyecto</option>`}</select></label><label class="text-sm text-slate-300">Nombre del medidor<input name="nombre" required maxlength="150" placeholder="Ej. Estación del patio" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3"></label><label class="text-sm text-slate-300">Tipo de sensor<select name="tipo" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3">${typeOptions || `<option value="">Sin tipos disponibles</option>`}</select></label><label class="text-sm text-slate-300">Descripción<input name="descripcion" maxlength="1000" placeholder="Ej. Sensor junto a la huerta" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3"></label><button ${!projectOptions || !typeOptions ? "disabled" : ""} class="rounded-xl bg-leaf px-5 py-3 text-sm font-semibold text-night disabled:cursor-not-allowed disabled:opacity-50 md:col-span-2">Agregar medidor</button></form></section><section class="glass rounded-2xl p-6"><div class="mb-4 flex items-center justify-between"><h3 class="font-semibold">Mediciones registradas</h3><span class="text-xs text-leaf">Actualización automática cada 5 segundos</span></div>${state.measurementsLoading ? `<p class="text-sm text-slate-400">Cargando mediciones…</p>` : state.measurementsError ? `<p class="text-sm text-red-300">No se pudieron cargar las mediciones: ${esc(state.measurementsError)}</p>` : state.measurements.length ? `<div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="border-b border-white/10 text-xs uppercase text-slate-500"><tr><th class="p-3">Proyecto</th><th class="p-3">Sensor</th><th class="p-3">Valor</th><th class="p-3">Fecha</th></tr></thead><tbody>${state.measurements.map((measurement) => `<tr class="border-b border-white/5"><td class="p-3">${esc(measurement.proyecto)}</td><td class="p-3">${esc(measurement.sensor)}</td><td class="p-3">${esc(measurement.valor)}</td><td class="p-3 text-slate-400">${esc(measurement.tiempo)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="text-sm text-slate-400">Todavía no hay mediciones en tus proyectos.</p>`}</section>`;
         mount(shell(content, "Sensores"), "sensores");
         document.querySelector("#refresh-measurements")?.addEventListener("click", cargarMediciones);
+        document.querySelector("#project-form")?.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const form = new FormData(event.target);
+          try {
+            const created = await apiRequest("/crearproyecto", {
+              method: "POST",
+              body: form,
+            });
+            toast(`Proyecto creado: ${created.titulo || form.get("Titulo")}`);
+            await cargarRecursosSensores();
+          } catch (error) {
+            toast(`No se pudo crear el proyecto: ${error.message}`, true);
+          }
+        });
+        document.querySelector("#sensor-form")?.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const form = new FormData(event.target);
+          try {
+            await apiRequest(`/proyectos/${encodeURIComponent(form.get("proyecto"))}/dispositivos`, {
+              method: "POST",
+              body: JSON.stringify({
+                nombre: String(form.get("nombre")).trim(),
+                descripcion: String(form.get("descripcion") || "").trim(),
+                sensores: [{
+                  id_ts: Number(form.get("tipo")),
+                  descripcion: String(form.get("descripcion") || "").trim(),
+                }],
+              }),
+            });
+            toast("Medidor agregado correctamente.");
+            event.target.reset();
+            await cargarRecursosSensores();
+          } catch (error) {
+            toast(`No se pudo agregar el medidor: ${error.message}`, true);
+          }
+        });
         if (!state.measurementsLoading && !state.measurementsLoaded) cargarMediciones();
+        if (!state.sensorSetupLoading && !state.projects.length && !state.sensorTypes.length) cargarRecursosSensores();
       }
 
       function mount(html, active) {
@@ -546,6 +716,10 @@
           return;
         }
         const page = location.hash.slice(1) || "dashboard";
+        if (page !== "dashboard" && state.dashboardRefreshTimer) {
+          clearInterval(state.dashboardRefreshTimer);
+          state.dashboardRefreshTimer = null;
+        }
         (
           ({
             dashboard,

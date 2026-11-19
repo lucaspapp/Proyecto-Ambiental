@@ -117,6 +117,24 @@ La ESP32 envía una tanda de mediciones a `POST /sensores`:
 La petición debe usar `Content-Type: application/json`. Cada `id_sp` debe
 existir en `sensores_proyecto` y pertenecer al proyecto indicado.
 
+### Simular un medidor desde Python
+
+Para probar la API sin una ESP32, ejecuta
+[`simular_medidor.py`](simular_medidor.py) con una cuenta que pertenezca al
+aula:
+
+```bash
+python simular_medidor.py --usuario profesor@ecolab.local --cantidad 10 --intervalo 3
+```
+
+El script permite elegir aula, proyecto y medidor de forma interactiva. También
+acepta `--aula`, `--proyecto` y `--medidor` con sus respectivos IDs o nombres.
+Genera valores ficticios según el tipo de sensor y los envía a `POST /sensores`.
+No guarda contraseñas ni tokens en el archivo. La API local se configura en
+`API_BASE_URL` dentro del script; para el hosting documentado usa
+`https://cn.weblab.tec4.ar/api/public`. También se puede sobrescribir al ejecutar
+con `--base-url`.
+
 En producción, los envíos sin sesión a `POST /sensores` deben incluir el
 encabezado `Authorization: Bearer <DEVICE_API_TOKEN>` y el ID del proyecto debe
 estar incluido en `DEVICE_PROJECT_IDS`. Configura ambos valores solo en el

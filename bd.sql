@@ -59,6 +59,7 @@ CREATE TABLE `mediciones` (
 CREATE TABLE `proyectos` (
   `Id_proyecto` int(11) NOT NULL,
   `Usuario` varchar(100) NOT NULL,
+  `id_aula` int(11) NOT NULL,
   `Descripcion` text DEFAULT NULL,
   `Titulo` varchar(200) NOT NULL,
   `curso` text DEFAULT NULL,
@@ -161,6 +162,7 @@ ALTER TABLE `mediciones`
 --
 ALTER TABLE `proyectos`
   ADD PRIMARY KEY (`Id_proyecto`),
+  ADD KEY `id_aula` (`id_aula`),
   ADD KEY `fk_proyectos_usuario` (`Usuario`);
 
 --
@@ -284,6 +286,12 @@ ALTER TABLE `aulas`
 ALTER TABLE `aula_miembros`
   ADD CONSTRAINT `fk_aula_miembros_aula` FOREIGN KEY (`id_aula`) REFERENCES `aulas` (`id_aula`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_aula_miembros_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE ON UPDATE CASCADE;
+INSERT IGNORE INTO `tipo_sensor` (`id_ts`, `nombre`, `Descripcion`, `k_conversion`) VALUES
+  (1, 'Temperatura', 'Temperatura ambiente', 1),
+  (2, 'Humedad', 'Humedad relativa', 1),
+  (3, 'Calidad del aire', 'Índice de calidad del aire', 1);
+ALTER TABLE `proyectos`
+  ADD CONSTRAINT `fk_proyectos_aula` FOREIGN KEY (`id_aula`) REFERENCES `aulas` (`id_aula`) ON DELETE CASCADE ON UPDATE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
