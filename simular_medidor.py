@@ -24,8 +24,16 @@ class ApiClient:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.opener = build_opener()
+        self.credentials: tuple[str, str] | None = None
 
-    def request(self, method: str, path: str, payload: dict | None = None) -> dict:
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        *,
+        retry_auth: bool = True,
+    ) -> dict:
         body = None
         headers = {"Accept": "application/json"}
         if payload is not None:
@@ -46,15 +54,20 @@ class ApiClient:
                 detail = json.loads(error.read().decode("utf-8")).get("detail", str(error))
             except (json.JSONDecodeError, UnicodeDecodeError):
                 detail = str(error)
+            if error.code == 401 and retry_auth and self.credentials is not None and path == "/sensores":
+                self.login(*self.credentials)
+                return self.request(method, path, payload, retry_auth=False)
             raise RuntimeError(f"La API respondió {error.code}: {detail}") from error
         except URLError as error:
             raise RuntimeError(f"No se pudo conectar con la API: {error.reason}") from error
 
     def login(self, username: str, password: str) -> None:
+        self.credentials = (username, password)
         self.request(
             "POST",
             "/auth/login",
             {"usuario": username, "contrasenia": password},
+            retry_auth=False,
         )
 
 
