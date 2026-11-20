@@ -80,14 +80,18 @@ location.reload();
 
 1. En el frontend selecciona **Crear cuenta**.
 2. Completa nombre, apellido, correo y una contraseña de al menos 12
-   caracteres.
+   caracteres. Puedes registrarte como estudiante o docente sin un código de
+   invitación. El registro público no permite crear cuentas administradoras.
 3. Inicia sesión.
 4. Un docente o administrador puede crear un aula desde **Mi clase**.
 5. Comparte el código del aula para que los alumnos se unan.
 6. Desde **Sensores**, configura el dispositivo y los sensores del aula.
 
 El registro usa `POST /crearuser` con `multipart/form-data`. La contraseña se
-almacena como hash y nunca se devuelve en las respuestas.
+almacena como hash y nunca se devuelve en las respuestas. El registro docente
+está abierto al público, igual que el registro de estudiantes. Si no quieres
+que cualquier visitante pueda registrarse como docente, desactiva el registro
+público o agrega una verificación de identidad separada.
 
 En el hosting actual, la API PHP está publicada bajo `/api/public`; por eso el
 frontend usa `https://cn.weblab.tec4.ar/api/public` como base de la API. Comprueba
@@ -131,9 +135,12 @@ El script permite elegir aula, proyecto y medidor de forma interactiva. También
 acepta `--aula`, `--proyecto` y `--medidor` con sus respectivos IDs o nombres.
 Genera valores ficticios según el tipo de sensor y los envía a `POST /sensores`.
 No guarda contraseñas ni tokens en el archivo. La API local se configura en
-`API_BASE_URL` dentro del script; para el hosting documentado usa
+`API_BASE_URL` dentro del script; por defecto usa
 `https://cn.weblab.tec4.ar/api/public`. También se puede sobrescribir al ejecutar
-con `--base-url`.
+con `--base-url`. Puedes repetir `--medidor` para enviar un lote por cada medidor
+seleccionado en cada intervalo. Para usar la contraseña desde una variable de
+entorno temporal, define `ECOLAB_PASSWORD` solo en el proceso que ejecuta el
+simulador; no la pases como argumento ni la guardes en el repositorio.
 
 En producción, los envíos sin sesión a `POST /sensores` deben incluir el
 encabezado `Authorization: Bearer <DEVICE_API_TOKEN>` y el ID del proyecto debe
@@ -145,8 +152,9 @@ el frontend ni en el repositorio.
 
 - El login crea una sesión PHP protegida con cookie `HttpOnly`, `SameSite=Strict`
   y `Secure` en producción. Las rutas de aulas/proyectos requieren sesión.
-- El registro público solo crea cuentas de estudiante. Las cuentas docentes y
-  administradoras deben provisionarse desde un flujo administrativo confiable.
+- El registro público permite crear cuentas de estudiante y docente sin
+  invitación; no permite asignar roles de administrador o invitado. Ten en
+  cuenta que cualquier visitante puede elegir el rol docente.
 - Las cuentas existentes que todavía tengan contraseñas heredadas sin hash deben
   restablecerse antes de poder iniciar sesión; luego se puede actualizar la clave
   desde el endpoint autenticado `POST /auth/change-password`.

@@ -25,6 +25,7 @@ Esta carpeta contiene la API de EcoLab implementada únicamente en PHP.
 | `GET` | `/aulas/{id_aula}/proyectos` | Ver proyectos y medidores del aula |
 | `POST` | `/sensores` | Guardar mediciones |
 | `GET` | `/sensores/actual` | Última tanda |
+| `GET` | `/sensores/historico?id_proyecto={id}` | Historial para el gráfico del proyecto |
 | `POST` | `/crearproyecto` | Crear proyecto dentro de un aula |
 | `GET` | `/proyectos` | Listar proyectos de las aulas propias |
 | `GET` | `/tipos-sensor` | Listar tipos de sensor |
@@ -37,7 +38,8 @@ Los proyectos requieren `id_aula` y solo son visibles para los miembros de esa
 aula. Los dispositivos y sensores pertenecen al proyecto; la creación de
 dispositivos queda restringida al propietario del proyecto. `/sensores/actual`
 acepta opcionalmente `id_proyecto` para consultar las mediciones de un proyecto
-concreto.
+concreto. `/sensores/historico` requiere `id_proyecto` y devuelve hasta 60
+lecturas recientes por sensor (máximo configurable: 200) para graficar tendencias.
 
 ## Variables de entorno
 
@@ -70,6 +72,9 @@ php run.php
 ## Seguridad y compatibilidad
 
 - Se conserva el uso de `pbkdf2_sha256` para la contraseña.
+- El registro permite elegir estudiante o docente, sin código de invitación.
+  Los roles administrador e invitado nunca se asignan desde el registro público.
+  Cualquier visitante puede crear una cuenta docente.
 - Se valida la pertenencia de sensores al proyecto antes de guardar mediciones.
 - Se usa PDO con consultas parametrizadas.
 - Se exponen errores estructurados con `detail` para mantener compatibilidad con la API actual.

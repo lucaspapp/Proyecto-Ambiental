@@ -171,11 +171,11 @@ Router::add('POST', '/crearuser', static function (): void {
     $id = strtolower(normalizeString((string) ($form['id'] ?? ''), 100));
     $nombre = normalizeString((string) ($form['nombre'] ?? ''), 100);
     $apellido = normalizeString((string) ($form['apellido'] ?? ''), 100);
-    $rol = 'estudiante';
+    $rol = normalizeString((string) ($form['rol'] ?? 'estudiante'), 30);
     $password = (string) ($form['contrasenia'] ?? '');
     $institucion = normalizeString((string) ($form['institucion'] ?? ''), 150);
 
-    if ($id === '' || filter_var($id, FILTER_VALIDATE_EMAIL) === false || $nombre === '' || $apellido === '' || strlen($password) < 12 || strlen($password) > 128) {
+    if ($id === '' || filter_var($id, FILTER_VALIDATE_EMAIL) === false || $nombre === '' || $apellido === '' || strlen($password) < 12 || strlen($password) > 128 || !in_array($rol, ['estudiante', 'docente'], true)) {
         Response::error('Validación fallida.', 422);
     }
     validateUserRole($rol);
@@ -749,11 +749,13 @@ Router::add('GET', '/sensores/actual', static function (): void {
         $pdo = Database::connection();
         $stmt = $pdo->prepare(
             "SELECT p.Id_proyecto AS id_proyecto, p.Titulo AS proyecto,
-                    m.Id_modulo AS id_modulo, m.id_sp AS id_sp,
+                    m.Id_modulo AS id_modulo, c.Nombre AS medidor, m.id_sp AS id_sp,
                     COALESCE(t.nombre, 'Sensor') AS sensor,
                     m.Valor AS valor, m.Tiempo AS tiempo
              FROM mediciones AS m
              INNER JOIN proyectos AS p ON p.Id_proyecto = m.Id_proyecto
+             INNER JOIN conf_modulos AS c
+                ON c.Id_proyecto = m.Id_proyecto AND c.Id_modulo = m.Id_modulo
              INNER JOIN sensores_proyecto AS s
                 ON s.id_proyecto = m.Id_proyecto
                 AND s.Id_modulo = m.Id_modulo
@@ -792,4 +794,67 @@ Router::add('GET', '/sensores/actual', static function (): void {
     }
 
     Response::json(['mediciones' => $mediciones]);
+});
+
+Router::add('GET', '/sensores/historico', static function (): void {
+    $usuario = (string) Auth::requireUser()['id'];
+    $idProyecto = (int) ($_GET['id_proyecto'] ?? 0);
+    $limite = min(200, max(5, (int) ($_GET['limite'] ?? 60)));
+    if ($idProyecto <= 0) {
+        Response::error('Debes seleccionar un proyecto válido.', 422);
+    }
+
+    try {
+        $pdo = Database::connection();
+        $access = $pdo->prepare(
+            'SELECT 1 FROM proyectos AS p
+             INNER JOIN aula_miembros AS am
+                ON am.id_aula = p.id_aula AND am.id_usuario = ?
+             WHERE p.Id_proyecto = ?'
+        );
+        $access->execute([$usuario, $idProyecto]);
+        if (!$access->fetchColumn()) {
+            Response::error('No tienes acceso a este proyecto.', 403);
+        }
+
+        $stmt = $pdo->prepare(
+            "SELECT id_medicion, id_proyecto, proyecto, id_modulo, medidor,
+                    id_sp, sensor, valor, tiempo
+             FROM (
+                SELECT m.Id_medicion AS id_medicion,
+                       m.Id_proyecto AS id_proyecto,
+                       p.Titulo AS proyecto,
+                       m.Id_modulo AS id_modulo,
+                       c.Nombre AS medidor,
+                       m.id_sp AS id_sp,
+                       COALESCE(t.nombre, 'Sensor') AS sensor,
+                       m.Valor AS valor,
+                       m.Tiempo AS tiempo,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY m.Id_proyecto, m.Id_modulo, m.id_sp
+                           ORDER BY m.Tiempo DESC, m.Id_medicion DESC
+                       ) AS orden_reciente
+                FROM mediciones AS m
+                INNER JOIN proyectos AS p ON p.Id_proyecto = m.Id_proyecto
+                INNER JOIN conf_modulos AS c
+                    ON c.Id_proyecto = m.Id_proyecto AND c.Id_modulo = m.Id_modulo
+                INNER JOIN sensores_proyecto AS s
+                    ON s.id_proyecto = m.Id_proyecto
+                    AND s.Id_modulo = m.Id_modulo
+                    AND s.id_sp = m.id_sp
+                LEFT JOIN tipo_sensor AS t ON t.id_ts = s.id_ts
+                WHERE m.Id_proyecto = ?
+             ) AS lecturas
+             WHERE orden_reciente <= ?
+             ORDER BY tiempo ASC, id_medicion ASC"
+        );
+        $stmt->execute([$idProyecto, $limite]);
+        $historial = $stmt->fetchAll();
+    } catch (ApiException $exception) {
+        throw $exception;
+    } catch (PDOException $exception) {
+        throw Database::handleException($exception);
+    }
+
+    Response::json(['historial' => $historial]);
 });

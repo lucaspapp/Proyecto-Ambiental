@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import random
 import sys
 import time
@@ -17,7 +18,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 # Cambiá esta línea para apuntar a la API publicada.
 # En el hosting documentado: https://cn.weblab.tec4.ar/api/public
-API_BASE_URL = "http://127.0.0.1:8003"
+API_BASE_URL = "https://cn.weblab.tec4.ar/api/public"
 
 
 class ApiClient:
@@ -119,17 +120,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--password", help="Contraseña; si se omite, se solicita de forma segura")
     parser.add_argument("--aula", help="ID o nombre del aula")
     parser.add_argument("--proyecto", help="ID o título del proyecto")
-    parser.add_argument("--medidor", help="ID o nombre del medidor")
+    parser.add_argument(
+        "--medidor",
+        action="append",
+        help="ID o nombre del medidor; se puede repetir para simular varios",
+    )
     parser.add_argument("--intervalo", type=float, default=5.0, help="Segundos entre lotes (default: 5)")
     parser.add_argument("--cantidad", type=int, default=0, help="Lotes a enviar; 0 significa hasta Ctrl+C")
     parser.add_argument("--seed", type=int, help="Semilla para repetir la simulación")
     return parser.parse_args()
 
 
+def select_meters(meters: list[dict], requested: list[str] | None) -> list[dict]:
+    if not requested:
+        return [choose(meters, "Medidores del proyecto", "nombre")]
+
+    selected = [select_by_id_or_name(meters, value, "nombre") for value in requested]
+    ids = [str(meter.get("id_modulo")) for meter in selected]
+    if len(ids) != len(set(ids)):
+        raise RuntimeError("No repitas el mismo medidor.")
+    return selected
+
+
 def main() -> int:
     args = parse_args()
     username = args.usuario or input("Usuario: ").strip()
-    password = args.password or getpass.getpass("Contraseña: ")
+    password = args.password or os.environ.get("ECOLAB_PASSWORD") or getpass.getpass("Contraseña: ")
     if args.intervalo <= 0 or args.cantidad < 0:
         print(" intervalo debe ser mayor que cero y cantidad no puede ser negativa.", file=sys.stderr)
         return 2
@@ -150,40 +166,43 @@ def main() -> int:
             else choose(projects, "Proyectos del aula", "titulo")
         )
         meters = project.get("medidores", [])
-        meter = (
-            select_by_id_or_name(meters, args.medidor, "nombre")
-            if args.medidor
-            else choose(meters, "Medidores del proyecto", "nombre")
-        )
-        sensors = meter.get("sensores", [])
-        if not sensors:
-            raise RuntimeError("El medidor elegido no tiene sensores configurados.")
+        selected_meters = select_meters(meters, args.medidor)
+        for meter in selected_meters:
+            if not meter.get("sensores"):
+                raise RuntimeError(
+                    f"El medidor '{meter.get('nombre', 'sin nombre')}' no tiene sensores configurados."
+                )
 
         randomizer = random.Random(args.seed)
+        meter_names = ", ".join(f"'{meter['nombre']}'" for meter in selected_meters)
         print(
-            f"\nSimulando '{meter['nombre']}' del proyecto '{project['titulo']}' "
+            f"\nSimulando {meter_names} del proyecto '{project['titulo']}' "
             f"en el aula '{aula['nombre']}'."
         )
         print("Presioná Ctrl+C para detener.\n")
 
         sent = 0
         while args.cantidad == 0 or sent < args.cantidad:
-            measurements = [
-                {"id_sp": sensor["id_sp"], "valor": fake_value(sensor, randomizer)}
-                for sensor in sensors
-            ]
-            result = client.request(
-                "POST",
-                "/sensores",
-                {
-                    "id_proyecto": project["id_proyecto"],
-                    "id_modulo": meter["id_modulo"],
-                    "mediciones": measurements,
-                },
-            )
             sent += 1
-            values = ", ".join(f"{item['valor']}" for item in measurements)
-            print(f"Lote {sent}: {values} | {result.get('mensaje', 'enviado')}")
+            for meter in selected_meters:
+                measurements = [
+                    {"id_sp": sensor["id_sp"], "valor": fake_value(sensor, randomizer)}
+                    for sensor in meter["sensores"]
+                ]
+                result = client.request(
+                    "POST",
+                    "/sensores",
+                    {
+                        "id_proyecto": project["id_proyecto"],
+                        "id_modulo": meter["id_modulo"],
+                        "mediciones": measurements,
+                    },
+                )
+                values = ", ".join(f"{item['valor']}" for item in measurements)
+                print(
+                    f"Lote {sent} · {meter['nombre']}: {values} | "
+                    f"{result.get('mensaje', 'enviado')}"
+                )
             if args.cantidad == 0 or sent < args.cantidad:
                 time.sleep(args.intervalo)
     except KeyboardInterrupt:

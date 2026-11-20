@@ -25,6 +25,7 @@ $requiredRouters = [
     'GET:/aulas/{id_aula}/miembros',
     'GET:/aulas/{id_aula}/proyectos',
     'GET:/sensores/actual',
+    'GET:/sensores/historico',
     'POST:/sensores',
 ];
 

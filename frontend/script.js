@@ -15,6 +15,10 @@
         measurementsLoading: false,
         measurementsError: "",
         measurementsLoaded: false,
+        measurementHistory: [],
+        historyLoading: false,
+        historyError: "",
+        dashboardRefreshRequest: 0,
         projects: [],
         projectsLoaded: false,
         projectsLoading: false,
@@ -100,6 +104,10 @@
         state.measurementsLoading = false;
         state.measurementsError = "";
         state.measurementsLoaded = false;
+        state.measurementHistory = [];
+        state.historyLoading = false;
+        state.historyError = "";
+        state.dashboardRefreshRequest = 0;
         state.projects = [];
         state.projectsLoaded = false;
         state.projectsLoading = false;
@@ -275,7 +283,7 @@
               go("dashboard");
             } catch (error) {
               msg.textContent = error.name === "AbortError"
-                ? "La API tardó demasiado en responder."
+                ? "La API no respondió en 5 segundos. Verificá que la API y MySQL/MariaDB estén en ejecución."
                 : error.message === "Failed to fetch"
                   ? "No se pudo conectar con la API. Verificá que esté iniciada."
                   : error.message;
@@ -297,7 +305,7 @@
                   <label class="text-sm text-slate-300">Nombre<input name="nombre" required maxlength="100" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label>
                   <label class="text-sm text-slate-300">Apellido<input name="apellido" required maxlength="100" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label>
                   <label class="text-sm text-slate-300 sm:col-span-2">Correo electrónico<input name="id" type="email" maxlength="100" required autocomplete="email" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"></label>
-                  <div class="text-sm text-slate-300">Rol<span class="mt-2 block rounded-xl border border-white/10 bg-night px-3 py-3 text-slate-400">Alumno</span><input name="rol" type="hidden" value="estudiante"></div>
+                  <label class="text-sm text-slate-300">Rol<select id="register-role" name="rol" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"><option value="estudiante">Alumno</option><option value="docente">Docente</option></select></label>
                   <label class="text-sm text-slate-300">Contraseña<input name="contrasenia" type="password" minlength="12" maxlength="128" autocomplete="new-password" required class="mt-2 w-full rounded-xl border border-white/10 bg-night px-3 py-3"><small class="mt-1 block text-slate-500">Usá al menos 12 caracteres.</small></label>
                   <button class="rounded-xl bg-cyan px-4 py-3 font-semibold text-night sm:col-span-2">Crear cuenta</button>
                   <p id="register-msg" class="sm:col-span-2 text-sm"></p>
@@ -341,34 +349,40 @@
             ? `<p class="text-sm text-red-300">No se pudieron cargar las aulas: ${esc(state.classroomsError)}</p>`
             : classroomCards || `<p class="text-sm text-slate-400">Todavía no estás en ninguna aula. Podés crear una o unirte con un código.</p>`;
         const measurementsContent = state.measurementsLoading
-          ? `<p class="text-sm text-slate-400">Cargando mediciones…</p>`
+          ? `<p class="text-sm text-slate-400">Cargando valores actuales…</p>`
           : state.measurementsError
-            ? `<p class="text-sm text-red-300">No se pudieron cargar las mediciones: ${esc(state.measurementsError)}</p>`
+            ? `<p class="text-sm text-red-300">No se pudieron cargar los valores: ${esc(state.measurementsError)}</p>`
             : state.measurements.length
-              ? `<div class="space-y-3">${state.measurements.slice(0, 5).map((measurement) =>
-                  `<div class="flex items-center justify-between gap-3 rounded-xl border border-white/10 p-3"><div><p class="font-medium">${esc(measurement.sensor || "Sensor")}</p><p class="text-xs text-slate-500">${esc(measurement.proyecto || "Proyecto")} · ${esc(measurement.tiempo)}</p></div><b>${esc(measurement.valor)}</b></div>`,
+              ? `<div class="grid gap-3 sm:grid-cols-2">${state.measurements.map((measurement, index) =>
+                  `<div class="flex items-center justify-between gap-3 rounded-xl border border-white/10 p-3"><div><p class="font-medium">${esc(measurement.medidor || "Medidor")} · ${esc(measurement.sensor || "Sensor")}</p><p class="text-xs text-slate-500">${esc(measurement.tiempo)}</p></div><b class="text-lg" style="color:${chartColor(measurement.id_modulo)}">${esc(measurement.valor)}</b></div>`,
                 ).join("")}</div>`
-              : `<p class="text-sm text-slate-400">Todavía no hay mediciones registradas en tus proyectos.</p>`;
+              : `<p class="text-sm text-slate-400">Todavía no hay mediciones registradas para este proyecto.</p>`;
+        const chartContent = state.historyLoading && !state.measurementHistory.length
+          ? `<p class="py-20 text-center text-sm text-slate-400">Cargando historial…</p>`
+          : state.historyError
+            ? `<p class="py-12 text-center text-sm text-red-300">No se pudo cargar el gráfico: ${esc(state.historyError)}</p>`
+            : measurementChart(state.measurementHistory);
         const measurementCount = state.measurementsLoaded ? state.measurements.length : "—";
         const projectPicker = state.projectsLoading
           ? `<p class="text-sm text-slate-400">Cargando proyectos…</p>`
           : projectOptions
             ? `<label class="block text-sm text-slate-300">Proyecto para ver en vivo<select id="dashboard-project" class="mt-2 w-full rounded-xl border border-white/10 bg-night px-4 py-3">${projectOptions}</select></label>`
             : `<p class="text-sm text-slate-400">Tus aulas todavía no tienen proyectos.</p>`;
-        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-slate-400">Buen día, ${esc(state.user?.nombre || "explorador")} 👋</p><h2 class="mt-1 text-3xl font-bold">Tu espacio ambiental</h2></div><button data-nav="clase" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night hover:bg-white">${icon("plus", "h-4 w-4 inline")} Crear o unirme a una clase</button></div><div class="grid gap-5 sm:grid-cols-2"><div>${stat(state.classroomsLoaded ? state.classrooms.length : "—", "Mis aulas", state.classroomsError ? "No disponibles" : "Datos sincronizados con la API", "cyan")}</div><div>${stat(measurementCount, "Mediciones recientes", "Registros reales de tus proyectos", "leaf")}</div></div><div class="mt-5 grid gap-5 lg:grid-cols-2"><section class="glass rounded-2xl p-6"><div class="mb-5 flex items-center justify-between"><h3 class="font-semibold">Mis aulas</h3><button data-nav="clase" class="text-xs text-cyan">Ver aulas</button></div><div class="space-y-3">${classroomsContent}</div></section><section class="glass rounded-2xl p-6"><div class="mb-5 flex items-center justify-between"><h3 class="font-semibold">Mediciones en vivo</h3><button id="refresh-measurements" class="text-xs text-cyan">Actualizar</button></div>${projectPicker}<div class="mt-4">${measurementsContent}</div></section></div><section class="glass mt-5 rounded-2xl p-6"><h3 class="font-semibold">Recursos para aprender</h3><div class="mt-5 grid gap-4 md:grid-cols-3">${resource("01", "¿Qué es un ecosistema?", "Conceptos base para comenzar", "cyan")}${resource("02", "Leer una gráfica", "Interpretá tendencias y cambios", "leaf")}${resource("03", "Tu primera medición", "Guía rápida del sensor", "soil")}</div></section>`;
+        const content = `<div class="mb-8 flex flex-wrap items-end justify-between gap-4"><div><p class="text-sm text-slate-400">Buen día, ${esc(state.user?.nombre || "explorador")} 👋</p><h2 class="mt-1 text-3xl font-bold">Tu espacio ambiental</h2></div><button data-nav="clase" class="rounded-xl bg-cyan px-5 py-3 text-sm font-semibold text-night hover:bg-white">${icon("plus", "h-4 w-4 inline")} Crear o unirme a una clase</button></div><div class="grid gap-5 sm:grid-cols-2"><div>${stat(state.classroomsLoaded ? state.classrooms.length : "—", "Mis aulas", state.classroomsError ? "No disponibles" : "Datos sincronizados con la API", "cyan")}</div><div>${stat(measurementCount, "Sensores con lecturas actuales", "Último valor recibido por sensor", "leaf")}</div></div><div class="mt-5 grid gap-5 lg:grid-cols-2"><section class="glass rounded-2xl p-6"><div class="mb-5 flex items-center justify-between"><h3 class="font-semibold">Mis aulas</h3><button data-nav="clase" class="text-xs text-cyan">Ver aulas</button></div><div class="space-y-3">${classroomsContent}</div></section><section class="glass rounded-2xl p-6"><div class="mb-5 flex items-center justify-between"><h3 class="font-semibold">Proyecto en vivo</h3><button id="refresh-measurements" class="text-xs text-cyan">Actualizar</button></div>${projectPicker}<div class="mt-4">${measurementsContent}</div></section></div><section class="glass mt-5 rounded-2xl p-6"><div class="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 class="font-semibold">Mediciones en vivo</h3><p class="mt-1 text-xs text-slate-500">Una línea de color por medidor · últimas 60 lecturas por sensor</p></div><span class="text-xs text-leaf">Actualización automática cada 5 segundos</span></div>${chartContent}<div class="mt-6 border-t border-white/10 pt-5"><h4 class="mb-3 text-sm font-medium text-slate-300">Últimos valores recibidos</h4>${measurementsContent}</div></section><section class="glass mt-5 rounded-2xl p-6"><h3 class="font-semibold">Recursos para aprender</h3><div class="mt-5 grid gap-4 md:grid-cols-3">${resource("01", "¿Qué es un ecosistema?", "Conceptos base para comenzar", "cyan")}${resource("02", "Leer una gráfica", "Interpretá tendencias y cambios", "leaf")}${resource("03", "Tu primera medición", "Guía rápida del sensor", "soil")}</div></section>`;
         mount(shell(content, "Dashboard"), "dashboard");
-        document.querySelector("#refresh-measurements")?.addEventListener("click", cargarMediciones);
+        document.querySelector("#refresh-measurements")?.addEventListener("click", actualizarMedicionesDashboard);
         document.querySelector("#dashboard-project")?.addEventListener("change", (event) => {
           state.selectedProjectId = event.target.value;
           state.measurementsLoaded = false;
-          cargarMediciones();
+          state.measurementHistory = [];
+          actualizarMedicionesDashboard();
         });
         if (state.dashboardRefreshTimer) {
           clearInterval(state.dashboardRefreshTimer);
         }
         state.dashboardRefreshTimer = setInterval(() => {
-          if (location.hash === "#dashboard" && !state.measurementsLoading && state.selectedProjectId) {
-            cargarMediciones();
+          if (location.hash === "#dashboard" && !state.measurementsLoading && !state.historyLoading && state.selectedProjectId) {
+            actualizarMedicionesDashboard();
           }
         }, 5000);
         if (!state.classroomsLoading && !state.classroomsLoaded) cargarAulas();
@@ -377,10 +391,127 @@
           cargarProyectos().finally(() => {
             state.projectsLoading = false;
             dashboard();
-            cargarMediciones();
           });
         }
-        if (!state.measurementsLoading && !state.measurementsLoaded) cargarMediciones();
+        if (!state.measurementsLoading && !state.measurementsLoaded && state.selectedProjectId) {
+          actualizarMedicionesDashboard();
+        }
+      }
+
+      function chartColor(meterId) {
+        const id = Math.abs(Number(meterId) || 0);
+        return `hsl(${((id * 137.508) % 360).toFixed(1)} 78% 65%)`;
+      }
+
+      function measurementChart(records) {
+        const bySensor = new Map();
+        records.forEach((record) => {
+          const value = Number(record.valor);
+          const time = new Date(String(record.tiempo || "").replace(" ", "T")).getTime();
+          if (!Number.isFinite(value) || !Number.isFinite(time)) return;
+          const key = String(record.id_sp);
+          if (!bySensor.has(key)) {
+            bySensor.set(key, {
+              id: Number(record.id_sp),
+              meterId: Number(record.id_modulo),
+              meter: record.medidor || "Medidor",
+              sensor: record.sensor || "Sensor",
+              points: [],
+            });
+          }
+          bySensor.get(key).points.push({time, value});
+        });
+
+        const series = Array.from(bySensor.values()).sort((a, b) => a.id - b.id);
+        if (!series.length) {
+          return `<div class="grid min-h-64 place-items-center text-center text-sm text-slate-400">Todavía no hay suficientes lecturas para dibujar el gráfico.<br>Al recibir mediciones, las líneas aparecerán aquí.</div>`;
+        }
+
+        const allPoints = series.flatMap((item) => item.points);
+        const minTime = Math.min(...allPoints.map((point) => point.time));
+        const maxTime = Math.max(...allPoints.map((point) => point.time));
+        let minValue = Math.min(...allPoints.map((point) => point.value));
+        let maxValue = Math.max(...allPoints.map((point) => point.value));
+        if (minValue === maxValue) {
+          const padding = Math.max(Math.abs(minValue) * 0.05, 1);
+          minValue -= padding;
+          maxValue += padding;
+        } else {
+          const padding = (maxValue - minValue) * 0.08;
+          minValue -= padding;
+          maxValue += padding;
+        }
+
+        const width = 900;
+        const height = 300;
+        const left = 64;
+        const right = 18;
+        const top = 18;
+        const bottom = 42;
+        const plotWidth = width - left - right;
+        const plotHeight = height - top - bottom;
+        const x = (time) => left + (maxTime === minTime ? 0.5 : (time - minTime) / (maxTime - minTime)) * plotWidth;
+        const y = (value) => top + ((maxValue - value) / (maxValue - minValue)) * plotHeight;
+        const grid = Array.from({length: 5}, (_, index) => {
+          const fraction = index / 4;
+          const position = top + fraction * plotHeight;
+          const value = maxValue - fraction * (maxValue - minValue);
+          return `<line x1="${left}" y1="${position}" x2="${width - right}" y2="${position}" stroke="rgba(255,255,255,.1)" stroke-dasharray="4 6"/><text x="${left - 10}" y="${position + 4}" fill="#94a3b8" font-size="11" text-anchor="end">${esc(Number(value.toPrecision(4)))}</text>`;
+        }).join("");
+        const xLabels = [minTime, (minTime + maxTime) / 2, maxTime].map((time, index) => {
+          const position = left + (index / 2) * plotWidth;
+          const label = new Date(time).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+          return `<text x="${position}" y="${height - 12}" fill="#64748b" font-size="11" text-anchor="${index === 0 ? "start" : index === 2 ? "end" : "middle"}">${esc(label)}</text>`;
+        }).join("");
+        const paths = series.map((item) => {
+          const color = chartColor(item.meterId);
+          const path = item.points.map((point, index) => `${index ? "L" : "M"}${x(point.time).toFixed(1)},${y(point.value).toFixed(1)}`).join(" ");
+          const dots = item.points.map((point) =>
+            `<circle cx="${x(point.time).toFixed(1)}" cy="${y(point.value).toFixed(1)}" r="2.5" fill="${color}"><title>${esc(item.meter)} · ${esc(item.sensor)}: ${esc(point.value)}</title></circle>`,
+          ).join("");
+          return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>${dots}`;
+        }).join("");
+        const legend = series.map((item) =>
+          `<span class="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-xs text-slate-300"><i class="h-2.5 w-2.5 rounded-full" style="background:${chartColor(item.meterId)}"></i>${esc(item.meter)} · ${esc(item.sensor)}</span>`,
+        ).join("");
+
+        return `<div><div class="overflow-x-auto"><svg class="h-72 min-w-[640px] w-full" viewBox="0 0 ${width} ${height}" role="img" aria-label="Historial de mediciones por medidor">${grid}${xLabels}${paths}</svg></div><div class="mt-4 flex flex-wrap gap-2">${legend}</div></div>`;
+      }
+
+      async function actualizarMedicionesDashboard() {
+        const projectId = state.selectedProjectId;
+        if (!projectId) return;
+        const requestId = ++state.dashboardRefreshRequest;
+        state.measurementsLoading = true;
+        state.historyLoading = true;
+        state.measurementsError = "";
+        state.historyError = "";
+        render();
+        try {
+          const query = `?id_proyecto=${encodeURIComponent(projectId)}`;
+          const [current, history] = await Promise.all([
+            apiRequest(`/sensores/actual${query}`),
+            apiRequest(`/sensores/historico${query}&limite=60`),
+          ]);
+          if (requestId !== state.dashboardRefreshRequest) return;
+          if (!Array.isArray(current.mediciones) || !Array.isArray(history.historial)) {
+            throw new Error("Formato de mediciones no válido.");
+          }
+          state.measurements = current.mediciones;
+          state.measurementHistory = history.historial;
+        } catch (error) {
+          if (requestId !== state.dashboardRefreshRequest) return;
+          const message = error.name === "AbortError" ? "tiempo de espera agotado" : error.message;
+          state.measurementsError = message;
+          state.historyError = message;
+        } finally {
+          if (requestId === state.dashboardRefreshRequest) {
+            state.measurementsLoading = false;
+            state.historyLoading = false;
+            state.measurementsLoaded = true;
+            render();
+          }
+        }
       }
 
       function stat(value, title, note, color) {
